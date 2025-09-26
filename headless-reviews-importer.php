@@ -23,6 +23,8 @@ class HRI_Review_Importer
     const OPTION_IMPORTED_LANGUAGES     = 'imported_languages';
     const OPTION_MIN_REVIEW_RATING      = 'hri_min_review_rating';
     const OPTION_LAST_RUN               = 'hri_import_last_run';
+    const OPTION_SKIP_EMPTY_REVIEWS = 'hri_skip_empty_comments';
+
 
     // Cron hook
     const CRON_HOOK = 'hri_import_cron_event';
@@ -124,6 +126,11 @@ class HRI_Review_Importer
             'sanitize_callback' => array($this, 'sanitize_min_rating'),
             'default'           => 4,
         ));
+        register_setting('hri_settings_group', self::OPTION_SKIP_EMPTY_REVIEWS, array(
+            'type'              => 'boolean',
+            'sanitize_callback' => array($this, 'sanitize_checkbox'),
+            'default'           => false,
+        ));
 
         add_settings_section(
             'hri_settings_section',
@@ -172,6 +179,18 @@ class HRI_Review_Importer
             'hri_settings_section'
         );
 
+        add_settings_field(
+            self::OPTION_SKIP_EMPTY_REVIEWS,
+            esc_html__('Skip empty revews', 'hri-reviews-importer'),
+            array($this, 'render_checkbox_field'),
+            'hri-review-import-settings',
+            'hri_settings_section',
+            array(
+                'option' => self::OPTION_SKIP_EMPTY_REVIEWS,
+                'label'  => esc_html__('If checked, reviews without a text comment will be skipped.', 'hri-reviews-importer'),
+            )
+        );
+
         // Ensure default languages option has a value
         if ('' === get_option(self::OPTION_IMPORTED_LANGUAGES, '')) {
             update_option(self::OPTION_IMPORTED_LANGUAGES, $this->get_default_lang_short());
@@ -193,6 +212,28 @@ class HRI_Review_Importer
             )
         );
     }
+
+    // Renders a checkbox with a label and optional help text
+    public function render_checkbox_field($args)
+    {
+        $option = $args['option'] ?? '';
+        $label  = $args['label']  ?? '';
+        $value  = (bool) get_option($option, false);
+
+        printf(
+            '<label><input type="checkbox" id="%1$s" name="%1$s" value="1" %2$s /> %3$s</label>',
+            esc_attr($option),
+            checked($value, true, false),
+            esc_html($label)
+        );
+    }
+
+    // Sanitizer for boolean checkbox values
+    public function sanitize_checkbox($value)
+    {
+        return (! empty($value)) ? 1 : 0;
+    }
+
 
     public function render_settings_page()
     {
@@ -409,7 +450,11 @@ class HRI_Review_Importer
 
         $args = array(
             'labels'             => $labels,
-            'public'             => false,
+            'public'             => true,
+            'show_in_rest'       => true,
+            'publicly_queryable' => true,
+            'rewrite'            => false,
+            'exclude_from_search' => true,
             'show_ui'            => true,
             'show_in_menu'       => true, // dedicated admin menu
             'menu_position'      => 25,
@@ -452,6 +497,7 @@ class HRI_Review_Importer
         $review_number = get_post_meta($post->ID, 'review_number', true);
         $review_id     = get_post_meta($post->ID, 'review_id', true);
         $review_source = get_post_meta($post->ID, 'review_source', true);
+        $profile_photo_url = get_post_meta($post->ID, 'profile_photo_url', true);
 
         if ($review_source !== 'Google' && $review_source !== 'Facebook') {
             $review_source = '';
@@ -480,6 +526,13 @@ class HRI_Review_Importer
                         <option value="Google" <?php selected($review_source, 'Google'); ?>><?php echo esc_html__('Google', 'hri-reviews-importer'); ?></option>
                         <option value="Facebook" <?php selected($review_source, 'Facebook'); ?>><?php echo esc_html__('Facebook', 'hri-reviews-importer'); ?></option>
                     </select>
+                </td>
+            </tr>
+            <tr>
+                <th><label for="profile_photo_url"><?php echo esc_html__('Profile photo URL', 'hri-reviews-importer'); ?></label></th>
+                <td>
+                    <input type="text" id="profile_photo_url" name="profile_photo_url" value="<?php echo esc_attr($profile_photo_url); ?>" class="regular-text" />
+                    <p class="description"><?php echo esc_html__('URL of the reviewer’s profile image.', 'hri-reviews-importer'); ?></p>
                 </td>
             </tr>
         </table>
@@ -539,6 +592,11 @@ class HRI_Review_Importer
                 $val = wp_kses_post($_POST[$key]);
                 update_post_meta($post_id, $key, $val);
             }
+        }
+        // Save profile_photo_url
+        if (isset($_POST['profile_photo_url'])) {
+            $url = esc_url_raw($_POST['profile_photo_url']);
+            update_post_meta($post_id, 'profile_photo_url', $url);
         }
     }
 
@@ -625,20 +683,22 @@ class HRI_Review_Importer
         return $short ?: '';
     }
 
-    public function hri_run_imports() {
+    public function hri_run_imports()
+    {
         $langs = $this->get_imported_languages_short_array();
 
         $google_api_key = get_option(self::OPTION_GOOGLE_PLACES_API_KEY, '');
         $google_place_id = get_option(self::OPTION_GOOGLE_PLACE_ID, '');
 
-        if(!empty($google_api_key) && !empty($google_place_id) && !empty($langs)) {
-            foreach($langs as $lang) {
+        if (!empty($google_api_key) && !empty($google_place_id) && !empty($langs)) {
+            foreach ($langs as $lang) {
                 $this->hri_import_google_reviews($lang);
             }
         }
     }
 
-    public function hri_import_google_reviews($language) {
+    public function hri_import_google_reviews($language)
+    {
 
         $headers = [
             'Content-Type' => 'application/json',
@@ -647,6 +707,7 @@ class HRI_Review_Importer
 
         $google_api_key = get_option(self::OPTION_GOOGLE_PLACES_API_KEY, '');
         $google_place_id = get_option(self::OPTION_GOOGLE_PLACE_ID, '');
+        $skip_empty = (bool) get_option(self::OPTION_SKIP_EMPTY_REVIEWS, false);
 
         $fields = array('formatted_address', 'icon', 'id', 'name', 'rating', 'reviews', 'url', 'user_ratings_total', 'vicinity');
         // $language = "en";
@@ -655,8 +716,8 @@ class HRI_Review_Importer
             . '?placeid=' . rawurlencode($google_place_id)
             . '&key=' . rawurlencode($google_api_key)
             . '&fields=' . rawurlencode(implode(',', $fields))
-            . '&reviews_sort=newest' // Last reviews first
-            . '&reviews_no_translations=false' 
+            . '&reviews_sort=newest' // Last reviews first newest/most_relevant
+            . '&reviews_no_translations=false'
             . (($language != NULL) ? '&language=' . rawurlencode($language) : '');
         error_log("URL: " . $url);
         if (version_compare(PHP_VERSION, '8.1') >= 0) {
@@ -672,28 +733,37 @@ class HRI_Review_Importer
             error_log('Google API error: ' . $data_array['error_message']);
             return;
         }
-
+        $reviews = array();
         if (isset($data_array['result']['reviews'])) {
             $data = $data_array['result'];
             foreach ($data['reviews'] as $key => $value) {
+                if ($skip_empty && empty(trim((string) $value['text']))) {
+                    continue; // skip this review
+                }
                 $review_id = md5(trim($value['author_url']) . trim($value['time']));
-                $data['reviews'][$key]['review_id'] = $review_id;
-                $data['reviews'][$key]['text'] = trim($value['text']);
-                $data['reviews'][$key]['review_time'] = $value['time'];
-                $data['reviews'][$key]['review_timestamp'] = date("Y-m-d H:i:s", $value['time']);
-                $data['reviews'][$key]['review_timestamp_gmt'] = gmdate("Y-m-d H:i:s", $value['time']);
-
-                $data['reviews'][$key]['rating'] = $value['rating'];
+                $reviews[$key]['review_id'] = $review_id;
+                $reviews[$key]['text'] = trim($value['text']);
+                $reviews[$key]['author_name'] = trim($value['author_name']);                
+                $reviews[$key]['review_time'] = $value['time'];
+                $reviews[$key]['review_timestamp'] = date("Y-m-d H:i:s", $value['time']);
+                $reviews[$key]['review_timestamp_gmt'] = gmdate("Y-m-d H:i:s", $value['time']);
+                $reviews[$key]['profile_photo_url'] = trim($value['profile_photo_url']);
+                $reviews[$key]['rating'] = $value['rating'];
             }
         } else {
             error_log('Google API error: No reviews.');
             return;
         }
 
+        //error_log('reviews: ' . print_r($reviews, true));
+
         //módosítja a két alap mezőt
 
         if (isset($data_array['result']['rating'])) {
-            $new_rating = floatval($data_array['result']['rating']);
+            //$new_rating = floatval($data_array['result']['rating']);
+
+            $raw_rating = isset($data_array['result']['rating']) ? $data_array['result']['rating'] : 0;
+            $new_rating = number_format((float) $raw_rating, 1, '.', ''); // pl. "5.0", "4.3"
 
             update_option('hri_google_rating', $new_rating);
         }
@@ -706,9 +776,9 @@ class HRI_Review_Importer
 
         //return;
 
-        if (!empty($data['reviews'])) {
+        if (!empty($reviews)) {
             $min_rating = get_option(self::OPTION_MIN_REVIEW_RATING, 4);
-            foreach ($data['reviews'] as $review) {
+            foreach ($reviews as $review) {
                 $existing = get_posts([
                     'post_type' => 'reviews',
                     'post_status' => 'any',
@@ -740,8 +810,11 @@ class HRI_Review_Importer
                     update_post_meta($post_id, 'review_source', 'Google');
                     update_post_meta($post_id, 'review_id', $review['review_id']);
                     update_post_meta($post_id, 'review_' . $language, $review['text']);
+                    update_post_meta($post_id, 'profile_photo_url', esc_url_raw($review['profile_photo_url']));
                 }
             }
+        } else {
+            error_log('Empty reviews.');
         }
     }
 }
