@@ -24,6 +24,10 @@ class HRI_Review_Importer
     const OPTION_MIN_REVIEW_RATING      = 'hri_min_review_rating';
     const OPTION_LAST_RUN               = 'hri_import_last_run';
     const OPTION_SKIP_EMPTY_REVIEWS = 'hri_skip_empty_comments';
+    const OPTION_GOOGLE_RATING =  'hri_google_rating';
+    const OPTION_GOOGLE_RATINGS_TOTAL = 'hri_user_ratings_total';
+    const OPTION_FACEBOOK_RATING = 'hri_facebook_rating';
+    const OPTION_FACEBOOK_RATINGS_TOTAL = 'hri_facebook_ratings_total';
 
 
     // Cron hook
@@ -46,6 +50,7 @@ class HRI_Review_Importer
 
         // Import now (admin-post)
         add_action('admin_post_hri_import_now', array($this, 'handle_import_now'));
+        add_action('admin_post_hri_import_relevant', array($this, 'handle_import_now'));
 
         // Cron
         add_action(self::CRON_HOOK, array($this, 'handle_cron'));
@@ -152,8 +157,8 @@ class HRI_Review_Importer
 
         $this->add_text_field(self::OPTION_FACEBOOK_GRAPH_API_KEY, __('Facebook Graph API Key', 'hri-reviews-importer'), 'hri-review-import-settings');
         $this->add_text_field(self::OPTION_FACEBOOK_PAGE_ID, __('Facebook Page ID', 'hri-reviews-importer'), 'hri-review-import-settings');
-        $this->add_text_field(self::OPTION_GOOGLE_PLACES_API_KEY, __('Google Places API key', 'hri-reviews-importer'), 'hri-review-import-settings');
-        $this->add_text_field(self::OPTION_GOOGLE_PLACE_ID, __('Google Place ID', 'hri-reviews-importer'), 'hri-review-import-settings');
+        $this->add_text_field(self::OPTION_GOOGLE_PLACES_API_KEY, __('Google Places API key', 'hri-reviews-importer'), 'hri-review-import-settings', __('Paste here your Places API API key.', 'hri-reviews-importer'));
+        $this->add_text_field(self::OPTION_GOOGLE_PLACE_ID, __('Google Place ID', 'hri-reviews-importer'), 'hri-review-import-settings', __('Your Google Place ID', 'hri-reviews-importer'));
 
         add_settings_field(
             self::OPTION_CRON_TIME,
@@ -181,7 +186,7 @@ class HRI_Review_Importer
 
         add_settings_field(
             self::OPTION_SKIP_EMPTY_REVIEWS,
-            esc_html__('Skip empty revews', 'hri-reviews-importer'),
+            esc_html__('Skip empty reviews', 'hri-reviews-importer'),
             array($this, 'render_checkbox_field'),
             'hri-review-import-settings',
             'hri_settings_section',
@@ -197,7 +202,7 @@ class HRI_Review_Importer
         }
     }
 
-    private function add_text_field($option, $label, $page)
+    private function add_text_field($option, $label, $page, $desc = '')
     {
         add_settings_field(
             $option,
@@ -208,7 +213,7 @@ class HRI_Review_Importer
             array(
                 'option'      => $option,
                 'placeholder' => '',
-                'desc'        => $option,
+                'desc'        => $desc,
             )
         );
     }
@@ -257,14 +262,30 @@ class HRI_Review_Importer
             <p><strong><?php echo esc_html__('Last run:', 'hri-reviews-importer'); ?></strong>
                 <?php echo $last_run ? esc_html($last_run) : esc_html__('not run yet', 'hri-reviews-importer'); ?>
             </p>
-            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
-                <?php wp_nonce_field('hri_import_now_nonce', 'hri_import_now_nonce_field'); ?>
-                <input type="hidden" name="action" value="hri_import_now" />
-                <?php submit_button(esc_html__('Import now', 'hri-reviews-importer'), 'secondary'); ?>
-            </form>
+            <div>
+                <div style="float:left;margin-right:12px;">
+                    <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                        <?php wp_nonce_field('hri_import_now_nonce', 'hri_import_now_nonce_field'); ?>
+                        <input type="hidden" name="action" value="hri_import_now" />
+                        <input type="hidden" name="sort_type" value="newest" />
+                        <?php submit_button(esc_html__('Import now', 'hri-reviews-importer'), 'secondary'); ?>
+                    </form>
+                </div>
+                <div style="float:left;">
+                    <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                        <?php wp_nonce_field('hri_import_now_nonce', 'hri_import_now_nonce_field'); ?>
+                        <input type="hidden" name="action" value="hri_import_now" />
+                        <input type="hidden" name="sort_type" value="most_relevant" />
+                        <?php submit_button(esc_html__('Import relevant reviews', 'hri-reviews-importer'), 'secondary'); ?>
+                    </form>
+                </div>
+                <div style="clear: both;"></div>
+            </div>
+
             <?php if (isset($_GET['hri_import']) && $_GET['hri_import'] === 'done') : ?>
                 <div class="notice notice-success is-dismissible">
-                    <p><?php echo esc_html__('Import executed.', 'hri-reviews-importer'); ?></p>
+                    <p><?php echo esc_html__('Import executed.', 'hri-reviews-importer'); ?>
+                    </p>
                 </div>
             <?php endif; ?>
 
@@ -307,7 +328,7 @@ class HRI_Review_Importer
             );
         }
         echo '</select>';
-        echo '<p class="description">' . esc_html__('hri_import_cron_time', 'hri-reviews-importer') . '</p>';
+        //echo '<p class="description">' . esc_html__('hri_import_cron_time', 'hri-reviews-importer') . '</p>';
     }
 
     public function render_min_rating()
@@ -383,10 +404,6 @@ class HRI_Review_Importer
         if (! current_user_can('manage_options')) wp_die(esc_html__('Insufficient permissions.', 'hri-reviews-importer'));
         check_admin_referer('hri_import_now_nonce', 'hri_import_now_nonce_field');
 
-        /**
-         * Fire import – attach your importer to this action.
-         * Example: add_action('hri_run_import', 'your_import_fn');
-         */
         do_action('hri_run_import');
 
         update_option(self::OPTION_LAST_RUN, current_time('mysql'));
@@ -695,6 +712,8 @@ class HRI_Review_Importer
                 $this->hri_import_google_reviews($lang);
             }
         }
+
+        //TODO: Facebook import
     }
 
     public function hri_import_google_reviews($language)
@@ -705,6 +724,8 @@ class HRI_Review_Importer
             'Referer' => get_site_url()
         ];
 
+        //error_log("HEADERS: " . print_r($headers, true));
+
         $google_api_key = get_option(self::OPTION_GOOGLE_PLACES_API_KEY, '');
         $google_place_id = get_option(self::OPTION_GOOGLE_PLACE_ID, '');
         $skip_empty = (bool) get_option(self::OPTION_SKIP_EMPTY_REVIEWS, false);
@@ -712,14 +733,18 @@ class HRI_Review_Importer
         $fields = array('formatted_address', 'icon', 'id', 'name', 'rating', 'reviews', 'url', 'user_ratings_total', 'vicinity');
         // $language = "en";
 
+        //error_log("POST: ".print_r($_POST, true));
+
+        $sort = sanitize_text_field($_POST["sort_type"]) == "most_relevant" ? "most_relevant" : "newest";
+
         $url = 'https://maps.googleapis.com/maps/api/place/details/json'
             . '?placeid=' . rawurlencode($google_place_id)
             . '&key=' . rawurlencode($google_api_key)
             . '&fields=' . rawurlencode(implode(',', $fields))
-            . '&reviews_sort=newest' // Last reviews first newest/most_relevant
+            . '&reviews_sort=' . $sort // Last reviews first newest/most_relevant
             . '&reviews_no_translations=false'
             . (($language != NULL) ? '&language=' . rawurlencode($language) : '');
-        error_log("URL: " . $url);
+        //error_log("URL: " . $url);
         if (version_compare(PHP_VERSION, '8.1') >= 0) {
             $data_string = wp_remote_retrieve_body(@wp_remote_get($url, $headers));
         } else {
@@ -727,7 +752,7 @@ class HRI_Review_Importer
         }
 
         $data_array = ($data_string != NULL) ? json_decode($data_string, TRUE) : NULL;
-        error_log('Google API response: ' . print_r($data_array, true));
+        //error_log('Google API response: ' . print_r($data_array, true));
 
         if (isset($data_array['error_message'])) {
             error_log('Google API error: ' . $data_array['error_message']);
@@ -743,7 +768,7 @@ class HRI_Review_Importer
                 $review_id = md5(trim($value['author_url']) . trim($value['time']));
                 $reviews[$key]['review_id'] = $review_id;
                 $reviews[$key]['text'] = trim($value['text']);
-                $reviews[$key]['author_name'] = trim($value['author_name']);                
+                $reviews[$key]['author_name'] = trim($value['author_name']);
                 $reviews[$key]['review_time'] = $value['time'];
                 $reviews[$key]['review_timestamp'] = date("Y-m-d H:i:s", $value['time']);
                 $reviews[$key]['review_timestamp_gmt'] = gmdate("Y-m-d H:i:s", $value['time']);
@@ -765,13 +790,13 @@ class HRI_Review_Importer
             $raw_rating = isset($data_array['result']['rating']) ? $data_array['result']['rating'] : 0;
             $new_rating = number_format((float) $raw_rating, 1, '.', ''); // pl. "5.0", "4.3"
 
-            update_option('hri_google_rating', $new_rating);
+            update_option(self::OPTION_GOOGLE_RATING, $new_rating);
         }
 
         if (isset($data_array['result']['user_ratings_total'])) {
             $new_rating = floatval($data_array['result']['user_ratings_total']);
 
-            update_option('hri_user_ratings_total', $new_rating);
+            update_option(self::OPTION_GOOGLE_RATINGS_TOTAL, $new_rating);
         }
 
         //return;
