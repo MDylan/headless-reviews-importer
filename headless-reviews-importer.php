@@ -29,6 +29,7 @@ class HRI_Review_Importer
     const OPTION_FACEBOOK_RATING = 'hri_facebook_rating';
     const OPTION_FACEBOOK_RATINGS_TOTAL = 'hri_facebook_ratings_total';
     const OPTION_LAST_ERROR = 'hri_last_error';
+    const OPTION_IMPORT_ORDER = 'hri_import_order';
 
 
     // Cron hook
@@ -117,6 +118,11 @@ class HRI_Review_Importer
             'sanitize_callback' => array($this, 'sanitize_text'),
             'default'           => '',
         ));
+        register_setting('hri_settings_group', self::OPTION_IMPORT_ORDER, array(
+            'type'              => 'string',
+            'sanitize_callback' => array($this, 'sanitize_import_order'),
+            'default'           => 'newest',
+        ));
         register_setting('hri_settings_group', self::OPTION_CRON_TIME, array(
             'type'              => 'string',
             'sanitize_callback' => array($this, 'sanitize_cron_time'),
@@ -183,6 +189,17 @@ class HRI_Review_Importer
         $this->add_text_field(self::OPTION_GOOGLE_PLACE_ID, __('Google Place ID', 'hri-reviews-importer'), 'hri-review-import-settings', __('Your Google Place ID', 'hri-reviews-importer'));
 
         add_settings_field(
+            self::OPTION_IMPORT_ORDER,
+            esc_html__('Import order', 'hri-reviews-importer'),
+            array($this, 'render_import_order_select'),
+            'hri-review-import-settings',
+            'hri_settings_section',
+            array(
+                'description' => esc_html__('Defines the order used when fetching reviews from Google Places.', 'hri-reviews-importer'),
+            )
+        );
+
+        add_settings_field(
             self::OPTION_CRON_TIME,
             esc_html__('Import frequency', 'hri-reviews-importer'),
             array($this, 'render_cron_select'),
@@ -223,6 +240,35 @@ class HRI_Review_Importer
             update_option(self::OPTION_IMPORTED_LANGUAGES, $this->get_default_lang_short());
         }
     }
+
+    public function render_import_order_select($args)
+    {
+        $current = get_option(self::OPTION_IMPORT_ORDER, 'newest');
+
+        echo '<select id="' . esc_attr(self::OPTION_IMPORT_ORDER) . '" name="' . esc_attr(self::OPTION_IMPORT_ORDER) . '">';
+        printf(
+            '<option value="newest"%s>%s</option>',
+            selected($current, 'newest', false),
+            esc_html__('Newest', 'hri-reviews-importer')
+        );
+        printf(
+            '<option value="most_relevant"%s>%s</option>',
+            selected($current, 'most_relevant', false),
+            esc_html__('Most Relevant', 'hri-reviews-importer')
+        );
+        echo '</select>';
+
+        if (! empty($args['description'])) {
+            echo '<p class="description">' . esc_html($args['description']) . '</p>';
+        }
+    }
+
+    public function sanitize_import_order($value)
+    {
+        $value = is_string($value) ? strtolower(trim($value)) : 'newest';
+        return in_array($value, array('newest', 'most_relevant'), true) ? $value : 'newest';
+    }
+
 
     private function add_text_field($option, $label, $page, $desc = '')
     {
@@ -284,26 +330,12 @@ class HRI_Review_Importer
             <p><strong><?php echo esc_html__('Last run:', 'hri-reviews-importer'); ?></strong>
                 <?php echo $last_run ? esc_html($last_run) : esc_html__('not run yet', 'hri-reviews-importer'); ?>
             </p>
-            <div>
-                <div style="float:left;margin-right:12px;">
-                    <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
-                        <?php wp_nonce_field('hri_import_now_nonce', 'hri_import_now_nonce_field'); ?>
-                        <input type="hidden" name="action" value="hri_import_now" />
-                        <input type="hidden" name="sort_type" value="newest" />
-                        <?php submit_button(esc_html__('Import now', 'hri-reviews-importer'), 'secondary'); ?>
-                    </form>
-                </div>
-                <div style="float:left;">
-                    <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
-                        <?php wp_nonce_field('hri_import_now_nonce', 'hri_import_now_nonce_field'); ?>
-                        <input type="hidden" name="action" value="hri_import_now" />
-                        <input type="hidden" name="sort_type" value="most_relevant" />
-                        <?php submit_button(esc_html__('Import relevant reviews', 'hri-reviews-importer'), 'secondary'); ?>
-                    </form>
-                </div>
-                <div style="clear: both;"></div>
-            </div>
-
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                <?php wp_nonce_field('hri_import_now_nonce', 'hri_import_now_nonce_field'); ?>
+                <input type="hidden" name="action" value="hri_import_now" />
+                <input type="hidden" name="sort_type" value="newest" />
+                <?php submit_button(esc_html__('Import now', 'hri-reviews-importer'), 'secondary'); ?>
+            </form>
             <?php if (isset($_GET['hri_import']) && $_GET['hri_import'] === 'done') : ?>
                 <div class="notice notice-success is-dismissible">
                     <p><?php echo esc_html__('Import executed.', 'hri-reviews-importer'); ?>
@@ -783,17 +815,16 @@ class HRI_Review_Importer
         $google_api_key = get_option(self::OPTION_GOOGLE_PLACES_API_KEY, '');
         $google_place_id = get_option(self::OPTION_GOOGLE_PLACE_ID, '');
         $skip_empty = (bool) get_option(self::OPTION_SKIP_EMPTY_REVIEWS, false);
+        $order = get_option(HRI_Review_Importer::OPTION_IMPORT_ORDER, 'newest');
 
         $fields = array('formatted_address', 'icon', 'id', 'name', 'rating', 'reviews', 'url', 'user_ratings_total', 'vicinity');
         // $language = "en";
-
-        $sort = sanitize_text_field($_POST["sort_type"]) == "most_relevant" ? "most_relevant" : "newest";
 
         $url = 'https://maps.googleapis.com/maps/api/place/details/json'
             . '?placeid=' . rawurlencode($google_place_id)
             . '&key=' . rawurlencode($google_api_key)
             . '&fields=' . rawurlencode(implode(',', $fields))
-            . '&reviews_sort=' . $sort // Last reviews first newest/most_relevant
+            . '&reviews_sort=' . $order // Last reviews first newest/most_relevant
             . '&reviews_no_translations=false'
             . (($language != NULL) ? '&language=' . rawurlencode($language) : '');
         //error_log("URL: " . $url);
