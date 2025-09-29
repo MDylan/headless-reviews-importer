@@ -508,7 +508,7 @@ class HRI_Review_Importer
     /** Sanitizers */
     public function sanitize_text($value)
     {
-        return is_string($value) ? trim(wp_kses_post($value)) : '';
+        return is_string($value) ? trim($value) : '';
     }
 
     public function sanitize_cron_time($value)
@@ -887,8 +887,11 @@ class HRI_Review_Importer
     {
 
         $headers = [
-            'Content-Type' => 'application/json',
-            'Referer' => get_site_url()
+            'headers' => [
+                'Content-Type' => 'application/json',
+                'Referer' => get_site_url()
+            ],
+            'timeout' => 20
         ];
 
         $google_api_key = trim((string) get_option(self::OPTION_GOOGLE_PLACES_API_KEY, ''));
@@ -991,7 +994,7 @@ class HRI_Review_Importer
                     update_post_meta($post_id, 'review_timestamp', $review['review_timestamp']);
                     update_post_meta($post_id, 'review_source', 'Google');
                     update_post_meta($post_id, 'review_id', $review['review_id']);
-                    update_post_meta($post_id, 'review_' . $language, $review['text']);
+                    update_post_meta($post_id, 'review_' . $language, wp_kses_post($review['text']));
                     update_post_meta($post_id, 'profile_photo_url', esc_url_raw($review['profile_photo_url']));
                 }
             }
