@@ -1,5 +1,5 @@
 === Headless Google/Facebook Reviews Importer ===
-Contributors: Molnár Dávid
+Contributors: MDylan (David Molnar)
 Tags: reviews, google, facebook, importer, headless, custom post type, cron
 Requires at least: 5.8
 Tested up to: 6.8
@@ -26,6 +26,7 @@ Facebook import is not tested yet.
   See also: https://developers.google.com/maps/faq#languagesupport
 - Custom post type: **reviews** (dedicated admin menu).
   - Meta fields:  
+    - `profile_photo_url` - The reviewer's profile photo
     - `review_number` (1–5) – rating  
     - `review_id` – non-editable identifier (set by the importer)  
     - `review_source` – "Google" or "Facebook"  
@@ -33,7 +34,11 @@ Facebook import is not tested yet.
 - Admin list extra columns: **Source**, **Rating** (sortable).
 - Full **i18n** support: Text Domain: `hri-reviews-importer`, Domain Path: `/languages`. Default labels are in English.
 
-> The plugin does not perform actual API calls — wire up your import logic to the provided hooks.
+Aggregated Google rating fields:
+- hri_google_rating: Google rating value
+- hri_google_rating: Total number of Google reviews
+- hri_facebook_rating: Facebook rating value
+- hri_facebook_ratings_total: Total number of Facebook reviews
 
 == Features ==
 
@@ -60,26 +65,6 @@ Facebook import is not tested yet.
 - **Scheduled import:** runs via cron at the selected frequency (hook: `hri_import_cron_event`).  
 - **Minimum rating:** reviews below the threshold may be saved as draft or skipped, depending on your importer logic.  
 - **Languages:** enter one short code per line (`hu`, `en`, ...). Values are normalized on save.
-
-== For Developers ==
-
-Aggregated Google rating fields:
-- hri_google_rating: Google rating value
-- hri_google_rating: Total number of Google reviews
-- hri_facebook_rating: Facebook rating value
-- hri_facebook_ratings_total: Total number of Facebook reviews
-
-The plugin creates a "reviews" post type.
-
-Retrievable fields:
-- Title = Reviewer's name
-- The publish date equals the time when the review was written.
-
-Meta fields:
-- review_number: Rating value (1–5)
-- profile_photo_url: The reviewer's profile photo
-- review_{lang}: The review text
-- review_source : Google/Facebook
 
 == Facebook usage - !!! NOT TESTED !!! ==
 You need to create a Meta App with these privileges:
