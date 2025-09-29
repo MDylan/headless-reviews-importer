@@ -28,6 +28,7 @@ class HRI_Review_Importer
     const OPTION_GOOGLE_RATINGS_TOTAL = 'hri_user_ratings_total';
     const OPTION_FACEBOOK_RATING = 'hri_facebook_rating';
     const OPTION_FACEBOOK_RATINGS_TOTAL = 'hri_facebook_ratings_total';
+    const OPTION_LAST_ERROR = 'hri_last_error';
 
 
     // Cron hook
@@ -310,6 +311,28 @@ class HRI_Review_Importer
                 </div>
             <?php endif; ?>
 
+            <?php
+            $last_error = get_option(self::OPTION_LAST_ERROR, array());
+
+            if (isset($_GET['hri_import']) && $_GET['hri_import'] === 'error') : ?>
+                <div class="notice notice-error is-dismissible">
+                    <p><?php echo esc_html__('Import failed. See the last error below.', 'hri-reviews-importer'); ?></p>
+                </div>
+            <?php endif; ?>
+
+            <?php if (! empty($last_error) && ! empty($last_error['message'])) : ?>
+                <div class="notice notice-error">
+                    <p><strong><?php echo esc_html__('Last error', 'hri-reviews-importer'); ?>:</strong>
+                        <?php echo esc_html($last_error['message']); ?>
+                    </p>
+                    <?php if (! empty($last_error['time'])) : ?>
+                        <p><em><?php echo esc_html__('When', 'hri-reviews-importer'); ?>:</em>
+                            <?php echo esc_html($last_error['time']); ?>
+                        </p>
+                    <?php endif; ?>
+                </div>
+            <?php endif; ?>
+
             <hr />
             <p><em><?php echo esc_html__('Tip:', 'hri-reviews-importer'); ?></em>
                 <?php echo esc_html__('Enter one code per line (e.g. "hu", "en"). We also accept "hu_HU", "en_US" but they will be normalized to the short code on save.', 'hri-reviews-importer'); ?>
@@ -425,9 +448,15 @@ class HRI_Review_Importer
         if (! current_user_can('manage_options')) wp_die(esc_html__('Insufficient permissions.', 'hri-reviews-importer'));
         check_admin_referer('hri_import_now_nonce', 'hri_import_now_nonce_field');
 
-        do_action('hri_run_import');
-
-        update_option(self::OPTION_LAST_RUN, current_time('mysql'));
+        try {
+            do_action('hri_run_import');
+            update_option(self::OPTION_LAST_RUN, current_time('mysql'));
+            $this->clear_last_error();
+            $query = array('hri_import' => 'done');
+        } catch (\Throwable $e) {
+            $this->log_error($e->getMessage(), array('where' => 'handle_import_now'));
+            $query = array('hri_import' => 'error');
+        }
 
         wp_redirect(add_query_arg('hri_import', 'done', admin_url('options-general.php?page=hri-review-import-settings')));
         exit;
@@ -463,8 +492,14 @@ class HRI_Review_Importer
 
     public function handle_cron()
     {
-        do_action('hri_run_import');
-        update_option(self::OPTION_LAST_RUN, current_time('mysql'));
+        try {
+            do_action('hri_run_import');
+            update_option(self::OPTION_LAST_RUN, current_time('mysql'));
+            $this->clear_last_error();
+        } catch (\Throwable $e) {
+            $this->log_error($e->getMessage(), array('where' => 'handle_cron'));
+            // Cron esetén nem redirectelünk; csak eltároljuk a hibát.
+        }
     }
 
     /** Reviews – Custom Post Type */
@@ -745,16 +780,12 @@ class HRI_Review_Importer
             'Referer' => get_site_url()
         ];
 
-        //error_log("HEADERS: " . print_r($headers, true));
-
         $google_api_key = get_option(self::OPTION_GOOGLE_PLACES_API_KEY, '');
         $google_place_id = get_option(self::OPTION_GOOGLE_PLACE_ID, '');
         $skip_empty = (bool) get_option(self::OPTION_SKIP_EMPTY_REVIEWS, false);
 
         $fields = array('formatted_address', 'icon', 'id', 'name', 'rating', 'reviews', 'url', 'user_ratings_total', 'vicinity');
         // $language = "en";
-
-        //error_log("POST: ".print_r($_POST, true));
 
         $sort = sanitize_text_field($_POST["sort_type"]) == "most_relevant" ? "most_relevant" : "newest";
 
@@ -776,7 +807,9 @@ class HRI_Review_Importer
         //error_log('Google API response: ' . print_r($data_array, true));
 
         if (isset($data_array['error_message'])) {
-            error_log('Google API error: ' . $data_array['error_message']);
+            //error_log('Google API error: ' . $data_array['error_message']);
+            $msg = 'Google API error: ' . $data_array['error_message'] . ', Status: ' . $data_array['status'];
+            throw new \RuntimeException($msg);
             return;
         }
         $reviews = array();
@@ -797,20 +830,15 @@ class HRI_Review_Importer
                 $reviews[$key]['rating'] = $value['rating'];
             }
         } else {
-            error_log('Google API error: No reviews.');
+            //error_log('Google API error: No reviews.');
+            $msg = 'Google API error: No reviews.';
+            throw new \RuntimeException($msg);
             return;
         }
 
-        //error_log('reviews: ' . print_r($reviews, true));
-
-        //módosítja a két alap mezőt
-
         if (isset($data_array['result']['rating'])) {
-            //$new_rating = floatval($data_array['result']['rating']);
-
             $raw_rating = isset($data_array['result']['rating']) ? $data_array['result']['rating'] : 0;
-            $new_rating = number_format((float) $raw_rating, 1, '.', ''); // pl. "5.0", "4.3"
-
+            $new_rating = number_format((float) $raw_rating, 1, '.', ''); 
             update_option(self::OPTION_GOOGLE_RATING, $new_rating);
         }
 
@@ -819,8 +847,6 @@ class HRI_Review_Importer
 
             update_option(self::OPTION_GOOGLE_RATINGS_TOTAL, $new_rating);
         }
-
-        //return;
 
         if (!empty($reviews)) {
             $min_rating = get_option(self::OPTION_MIN_REVIEW_RATING, 4);
@@ -860,8 +886,24 @@ class HRI_Review_Importer
                 }
             }
         } else {
-            error_log('Empty reviews.');
+            $msg = 'There is no reviews with comment';
+            throw new \RuntimeException($msg);
         }
+    }
+
+    private function log_error($message, $context = array())
+    {
+        $payload = array(
+            'message' => is_string($message) ? $message : print_r($message, true),
+            'time'    => current_time('mysql'),
+            'context' => ! empty($context) ? $context : null,
+        );
+        update_option(self::OPTION_LAST_ERROR, $payload);
+    }
+
+    private function clear_last_error()
+    {
+        delete_option(self::OPTION_LAST_ERROR);
     }
 }
 
