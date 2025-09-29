@@ -10,6 +10,9 @@ License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
 A headless Google/Facebook reviews importer: settings page, scheduled and manual import, minimum rating filter, multilingual text fields, a dedicated "reviews" custom post type, and extra admin list columns. Default admin labels are in English and fully translatable (i18n).
 
+== IMPORTANT == 
+Facebook import is not tested yet.
+
 == Description ==
 
 **Headless Google/Facebook Reviews Importer** is a developer-friendly plugin that prepares the infrastructure for importing reviews (Google / Facebook):
@@ -77,3 +80,9 @@ Meta fields:
 - profile_photo_url: The reviewer's profile photo
 - review_{lang}: The review text
 - review_source : Google/Facebook
+
+== Facebook usage - !!! NOT TESTED !!! ==
+You need to create a Meta App with these privileges:
+- pages_show_list
+- pages_read_user_content
+- pages_read_engagement

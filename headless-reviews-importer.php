@@ -72,6 +72,8 @@ class HRI_Review_Importer
         add_action('pre_get_posts', array($this, 'reviews_orderby_rating'));
 
         add_action('hri_run_import', array($this, 'hri_run_imports'));
+
+        add_action('admin_post_hri_test_fb_connection', array($this, 'handle_test_fb_connection'));
     }
 
     /**
@@ -416,6 +418,24 @@ class HRI_Review_Importer
                     <?php endif; ?>
                 </div>
             <?php endif; ?>
+
+            <?php if (isset($_GET['hri_fbtest']) && $_GET['hri_fbtest'] === 'ok') : ?>
+                <div class="notice notice-success is-dismissible">
+                    <p><?php echo esc_html__('Facebook connection test succeeded.', 'hri-reviews-importer'); ?></p>
+                </div>
+            <?php elseif (isset($_GET['hri_fbtest']) && $_GET['hri_fbtest'] === 'error') : ?>
+                <div class="notice notice-error is-dismissible">
+                    <p><?php echo esc_html__('Facebook connection test failed. See the "Last error" below.', 'hri-reviews-importer'); ?></p>
+                </div>
+            <?php endif; ?>
+
+            <h2><?php echo esc_html__('Facebook connection test', 'hri-reviews-importer'); ?></h2>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                <?php wp_nonce_field('hri_test_fb', 'hri_test_fb_field'); ?>
+                <input type="hidden" name="action" value="hri_test_fb_connection" />
+                <?php submit_button(esc_html__('Test Facebook connection', 'hri-reviews-importer'), 'secondary'); ?>
+            </form>
+
 
             <hr />
             <p><em><?php echo esc_html__('Tip:', 'hri-reviews-importer'); ?></em>
@@ -850,8 +870,8 @@ class HRI_Review_Importer
     {
         $langs = $this->get_imported_languages_short_array();
 
-        $google_api_key = get_option(self::OPTION_GOOGLE_PLACES_API_KEY, '');
-        $google_place_id = get_option(self::OPTION_GOOGLE_PLACE_ID, '');
+        $google_api_key = trim((string) get_option(self::OPTION_GOOGLE_PLACES_API_KEY, ''));
+        $google_place_id = trim((string) get_option(self::OPTION_GOOGLE_PLACE_ID, ''));
 
         if (!empty($google_api_key) && !empty($google_place_id) && !empty($langs)) {
             foreach ($langs as $lang) {
@@ -859,7 +879,8 @@ class HRI_Review_Importer
             }
         }
 
-        //TODO: Facebook import
+        //Facebook import
+        $this->hri_import_facebook_reviews();
     }
 
     public function hri_import_google_reviews($language)
@@ -870,8 +891,8 @@ class HRI_Review_Importer
             'Referer' => get_site_url()
         ];
 
-        $google_api_key = get_option(self::OPTION_GOOGLE_PLACES_API_KEY, '');
-        $google_place_id = get_option(self::OPTION_GOOGLE_PLACE_ID, '');
+        $google_api_key = trim((string) get_option(self::OPTION_GOOGLE_PLACES_API_KEY, ''));
+        $google_place_id = trim((string) get_option(self::OPTION_GOOGLE_PLACE_ID, ''));
         $skip_empty = (bool) get_option(self::OPTION_SKIP_EMPTY_REVIEWS, false);
         $order = get_option(HRI_Review_Importer::OPTION_IMPORT_ORDER, 'newest');
 
@@ -927,7 +948,7 @@ class HRI_Review_Importer
 
         if (isset($data_array['result']['rating'])) {
             $raw_rating = isset($data_array['result']['rating']) ? $data_array['result']['rating'] : 0;
-            $new_rating = number_format((float) $raw_rating, 1, '.', ''); 
+            $new_rating = number_format((float) $raw_rating, 1, '.', '');
             update_option(self::OPTION_GOOGLE_RATING, $new_rating);
         }
 
@@ -938,7 +959,7 @@ class HRI_Review_Importer
         }
 
         if (!empty($reviews)) {
-            $min_rating = get_option(self::OPTION_MIN_REVIEW_RATING, 4);
+            $min_rating = (int) get_option(self::OPTION_MIN_REVIEW_RATING, 4);
             foreach ($reviews as $review) {
                 $existing = get_posts([
                     'post_type' => 'reviews',
@@ -994,7 +1015,215 @@ class HRI_Review_Importer
     {
         delete_option(self::OPTION_LAST_ERROR);
     }
+
+    public function hri_import_facebook_reviews()
+    {
+        $page_id     = trim((string) get_option(self::OPTION_FACEBOOK_PAGE_ID, ''));
+        $page_token  = trim((string) get_option(self::OPTION_FACEBOOK_GRAPH_API_KEY, '')); // Page Access Token!
+        $min_rating  = (int) get_option(self::OPTION_MIN_REVIEW_RATING, 4);
+        $skip_empty  = (bool) get_option(self::OPTION_SKIP_EMPTY_REVIEWS, false);
+
+        if ($page_id === '' || $page_token === '') {
+            return;
+        }
+
+        // Első nyelv a beállított listából (ide tesszük a review szöveget)
+        $langs_raw = (string) get_option(self::OPTION_IMPORTED_LANGUAGES, 'en');
+        $lang = 'en';
+        foreach (preg_split('/[\r\n,]+/', $langs_raw) as $piece) {
+            $piece = strtolower(trim((string) $piece));
+            if ($piece !== '') {
+                $lang = preg_replace('/[^a-z]/', '', explode('-', str_replace('_', '-', $piece))[0]);
+                break;
+            }
+        }
+
+        $base  = 'https://graph.facebook.com/v21.0/' . rawurlencode($page_id) . '/ratings';
+        // Kérhető hasznos mezők (ha valamelyik hiányzik: API/engedély kérdése)
+        $fields = 'id,created_time,recommendation_type,review_text,has_rating,rating,'
+            . 'reviewer{id,name,picture.height(120).width(120)}';
+        $limit  = 25;
+
+        $url = add_query_arg(array(
+            'fields'       => $fields,
+            'limit'        => $limit,
+            'access_token' => $page_token,
+        ), $base);
+
+        while ($url) {
+            $res = wp_remote_get($url, array('timeout' => 20));
+            if (is_wp_error($res)) {
+                error_log('HRI FB import: HTTP error – ' . $res->get_error_message());
+                return;
+            }
+
+            $code = wp_remote_retrieve_response_code($res);
+            $body = json_decode(wp_remote_retrieve_body($res), true);
+
+            if ($code !== 200 || !is_array($body)) {
+                error_log('HRI FB import: Bad response (' . $code . '): ' . substr((string) wp_remote_retrieve_body($res), 0, 500));
+                return;
+            }
+
+            // Facebook hibaüzenet?
+            if (!empty($body['error']['message'])) {
+                error_log('HRI FB import: Graph API error – ' . $body['error']['message']);
+                return;
+            }
+
+            foreach ((array) ($body['data'] ?? []) as $item) {
+                $rec_id   = isset($item['id']) ? (string) $item['id'] : '';
+                if ($rec_id === '') {
+                    continue;
+                }
+
+                $review_id  = 'facebook:' . $rec_id; // ütközés elkerülésére prefix
+                $created_iso = isset($item['created_time']) ? (string) $item['created_time'] : null;
+                $text        = isset($item['review_text']) ? (string) $item['review_text'] : '';
+
+                if ($skip_empty && trim($text) === '') {
+                    continue;
+                }
+
+                // Értékelés: ha van csillag (1–5), azt használjuk, különben Recommendation típusból képezünk
+                $rating = null;
+                if (isset($item['rating']) && is_numeric($item['rating'])) {
+                    $rating = (float) $item['rating'];
+                } elseif (!empty($item['recommendation_type'])) {
+                    // positive/negative → 5 vagy 1 (igény szerint állítható)
+                    $rating = ($item['recommendation_type'] === 'positive') ? 5.0 : 1.0;
+                }
+
+                // Dátumok
+                $post_date_gmt = $created_iso ? gmdate('Y-m-d H:i:s', strtotime($created_iso)) : current_time('mysql', true);
+                $post_date     = get_date_from_gmt($post_date_gmt, 'Y-m-d H:i:s');
+
+                // Reviewer adatok
+                $reviewer_name = $item['reviewer']['name'] ?? 'Facebook User';
+                $profile_photo_url = $item['reviewer']['picture']['data']['url'] ?? '';
+
+                // Meglévő bejegyzés?
+                $existing = get_posts(array(
+                    'post_type'      => 'reviews',
+                    'post_status'    => 'any',
+                    'meta_key'       => 'review_id',
+                    'meta_value'     => $review_id,
+                    'fields'         => 'ids',
+                    'posts_per_page' => 1,
+                    'no_found_rows'  => true,
+                ));
+
+                $post_status = ($rating !== null && $rating >= $min_rating) ? 'publish' : 'draft';
+
+                if (empty($existing)) {
+                    $post_id = wp_insert_post(array(
+                        'post_type'     => 'reviews',
+                        'post_title'    => sanitize_text_field($reviewer_name),
+                        'post_status'   => $post_status,
+                        'post_date'     => $post_date,
+                        'post_date_gmt' => $post_date_gmt,
+                        'post_name'     => sanitize_title('review-facebook-' . $rec_id),
+                        'meta_input'    => array(
+                            'review_id'         => $review_id,
+                            'review_source'     => 'Facebook',
+                            'review_number'     => ($rating !== null ? (float) $rating : null),
+                            'profile_photo_url' => esc_url_raw($profile_photo_url),
+                        ),
+                    ));
+                } else {
+                    $post_id = (int) $existing[0];
+                    wp_update_post(array(
+                        'ID'          => $post_id,
+                        'post_status' => $post_status,
+                        // opcionális: frissítsd a dátumot a review időpontjára
+                        // 'post_date'     => $post_date,
+                        // 'post_date_gmt' => $post_date_gmt,
+                    ));
+                    if ($rating !== null) {
+                        update_post_meta($post_id, 'review_number', (float) $rating);
+                    }
+                    update_post_meta($post_id, 'profile_photo_url', esc_url_raw($profile_photo_url));
+                    update_post_meta($post_id, 'review_source', 'Facebook');
+                }
+
+                if (!empty($post_id)) {
+                    // Szöveg betöltése a beállított első nyelvi mezőbe
+                    update_post_meta($post_id, 'review_' . $lang, wp_kses_post($text));
+                    // Opcionális timestamp mentés
+                    update_post_meta($post_id, 'review_timestamp', $post_date);
+                }
+            }
+
+            // Lapozás
+            $url = $body['paging']['next'] ?? null;
+            if ($url) {
+                // Append access_token only if not present
+                if (strpos($url, 'access_token=') === false) {
+                    $url = add_query_arg('access_token', $page_token, $url);
+                }
+            }
+        }
+    }
+
+    public function handle_test_fb_connection()
+    {
+        if (! current_user_can('manage_options')) {
+            wp_die(esc_html__('Insufficient permissions.', 'hri-reviews-importer'));
+        }
+        check_admin_referer('hri_test_fb', 'hri_test_fb_field');
+
+        $page_id    = trim((string) get_option(self::OPTION_FACEBOOK_PAGE_ID, ''));
+        $page_token = trim((string) get_option(self::OPTION_FACEBOOK_GRAPH_API_KEY, ''));
+
+        try {
+            if ($page_id === '' || $page_token === '') {
+                throw new \RuntimeException(__('Missing Facebook Page ID or Page Access Token.', 'hri-reviews-importer'));
+            }
+
+            // v21.0 ajánlott a ratings/recommendations eléréséhez
+            $base  = 'https://graph.facebook.com/v21.0/' . rawurlencode($page_id) . '/ratings';
+            $url   = add_query_arg(array(
+                'fields'       => 'id',
+                'limit'        => 1,
+                'access_token' => $page_token,
+            ), $base);
+
+            $res = wp_remote_get($url, array('timeout' => 15));
+            if (is_wp_error($res)) {
+                throw new \RuntimeException('HTTP error: ' . $res->get_error_message());
+            }
+
+            $code    = wp_remote_retrieve_response_code($res);
+            $bodyraw = wp_remote_retrieve_body($res);
+            $body    = json_decode($bodyraw, true);
+
+            if ($code !== 200) {
+                throw new \RuntimeException('Bad response code: ' . $code . ' – ' . substr($bodyraw, 0, 300));
+            }
+            if (! is_array($body)) {
+                throw new \RuntimeException('Invalid JSON response.');
+            }
+            if (! empty($body['error']['message'])) {
+                throw new \RuntimeException('Graph API error: ' . $body['error']['message']);
+            }
+
+            // siker
+            if (method_exists($this, 'clear_last_error')) {
+                $this->clear_last_error();
+            }
+            $q = array('hri_fbtest' => 'ok');
+        } catch (\Throwable $e) {
+            if (method_exists($this, 'log_error')) {
+                $this->log_error($e->getMessage(), array('where' => 'handle_test_fb_connection'));
+            } else {
+                error_log('HRI FB test: ' . $e->getMessage());
+            }
+            $q = array('hri_fbtest' => 'error');
+        }
+
+        wp_redirect(add_query_arg($q, admin_url('options-general.php?page=hri-review-import-settings')));
+        exit;
+    }
 }
 
 new HRI_Review_Importer();
-
