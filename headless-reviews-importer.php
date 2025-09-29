@@ -74,6 +74,58 @@ class HRI_Review_Importer
         add_action('hri_run_import', array($this, 'hri_run_imports'));
     }
 
+    /**
+     * Set autoload for a single option (works for existing + new options).
+     *
+     * @param string       $name
+     * @param mixed        $default   Default to create with if missing.
+     * @param bool  $autoload  true or false
+     */
+    private function hri_set_option_autoload($name, $default = '', $autoload = false)
+    {
+        $exists = get_option($name, '__hri_missing__');
+        $autoload = $autoload ? true : false;
+
+        if ('__hri_missing__' === $exists) {
+            // create with desired autoload
+            add_option($name, $default, '', $autoload);
+            return;
+        } else {
+            update_option($name, '', $autoload);
+            // re-save value with desired autoload
+            // For existing options, $autoload can only be updated using update_option() if $value is also changed.
+            update_option($name, $exists, $autoload);
+        }
+    }
+
+
+    /**
+     * Set options autoload
+     * 
+     * @param bool $forcefalse true/false If true, all option's autoload will be set off
+     */
+    private function hri_enforce_autoloads($forcefalse = false)
+    {
+        // Used on fronted so autoload=YES
+        $this->hri_set_option_autoload(self::OPTION_GOOGLE_RATING, '5.0', $forcefalse ? false : true);
+        $this->hri_set_option_autoload(self::OPTION_GOOGLE_RATINGS_TOTAL, '1', $forcefalse ? false : true);
+        $this->hri_set_option_autoload(self::OPTION_FACEBOOK_RATING, '5.0', $forcefalse ? false : true);
+        $this->hri_set_option_autoload(self::OPTION_FACEBOOK_RATINGS_TOTAL, '1', $forcefalse ? false : true);
+
+        // Only on admin/import – autoload=NO
+        $this->hri_set_option_autoload(self::OPTION_FACEBOOK_GRAPH_API_KEY,   '', false);
+        $this->hri_set_option_autoload(self::OPTION_FACEBOOK_PAGE_ID,   '', false);
+        $this->hri_set_option_autoload(self::OPTION_GOOGLE_PLACES_API_KEY,   '', false);
+        $this->hri_set_option_autoload(self::OPTION_GOOGLE_PLACE_ID,   '', false);
+        $this->hri_set_option_autoload(self::OPTION_CRON_TIME,   'hourly', false);
+        $this->hri_set_option_autoload(self::OPTION_MIN_REVIEW_RATING,   '4', false);
+        $this->hri_set_option_autoload(self::OPTION_IMPORTED_LANGUAGES,   $this->get_default_lang_short(), false);
+        $this->hri_set_option_autoload(self::OPTION_LAST_RUN,   '', false);
+        $this->hri_set_option_autoload(self::OPTION_SKIP_EMPTY_REVIEWS,   1, false);
+        $this->hri_set_option_autoload(self::OPTION_IMPORT_ORDER,   'newest', false);
+        $this->hri_set_option_autoload(self::OPTION_LAST_ERROR,   array(), false);
+    }
+
     /** I18n */
     public function load_textdomain()
     {
@@ -497,6 +549,10 @@ class HRI_Review_Importer
     /** Cron */
     public static function activate()
     {
+
+        $self = new self();
+        $self->hri_enforce_autoloads();
+
         $freq = get_option(self::OPTION_CRON_TIME, 'hourly');
         if (! in_array($freq, array('hourly', 'twicedaily', 'daily'), true)) $freq = 'hourly';
         if (! wp_next_scheduled(self::CRON_HOOK)) {
@@ -509,6 +565,8 @@ class HRI_Review_Importer
         while ($ts = wp_next_scheduled(self::CRON_HOOK)) {
             wp_unschedule_event($ts, self::CRON_HOOK);
         }
+        $self = new self();
+        $self->hri_enforce_autoloads(true);
     }
 
     public function reschedule_cron_on_option_change($old_value, $new_value)
@@ -940,11 +998,3 @@ class HRI_Review_Importer
 
 new HRI_Review_Importer();
 
-/**
- * DEV NOTES:
- * - Minimum imported rating: get_option('hri_min_review_rating', 4)
- * - Languages: explode("\n", get_option('imported_languages'))
- * - Trigger import: do_action('hri_run_import')
- * - Cron hook: hri_import_cron_event
- * - Last run: update_option('hri_import_last_run', current_time('mysql'))
- */
