@@ -151,9 +151,30 @@ class HRI_Review_Importer
                     esc_url('https://developers.google.com/maps/faq#languagesupport'),
                     esc_html__('Google Maps – Language support', 'hri-reviews-importer')
                 );
+
+                // --- Added note blocks ---
+                echo '<p><strong>' . esc_html__('How to get the required Google Places API Key:', 'hri-reviews-importer') . '</strong></p>';
+                printf(
+                    '<ul style="margin-top:0;"><li>%s <a href="%s" target="_blank" rel="noopener">%s</a></li><li>%s</li></ul>',
+                    esc_html__('Use:', 'hri-reviews-importer'),
+                    esc_url('https://developers.google.com/maps/documentation/places/web-service/get-api-key'),
+                    esc_html__('Get an API key (Places API). You need the Legacy Places API for this plugin', 'hri-reviews-importer'),
+                    esc_html__('Then follow the explained steps.', 'hri-reviews-importer')
+                );
+
+                echo '<p><strong>' . esc_html__('How to find the required Place ID:', 'hri-reviews-importer') . '</strong></p>';
+                printf(
+                    '<ul style="margin-top:0;"><li>%s <a href="%s" target="_blank" rel="noopener">%s</a></li><li>%s</li></ul>',
+                    esc_html__('Use:', 'hri-reviews-importer'),
+                    esc_url('https://developers.google.com/maps/documentation/places/web-service/place-id'),
+                    esc_html__('Place IDs documentation', 'hri-reviews-importer'),
+                    esc_html__('Search for the desired business name.', 'hri-reviews-importer')
+                );
+                // --- /Added note blocks ---
             },
             'hri-review-import-settings'
         );
+
 
         $this->add_text_field(self::OPTION_FACEBOOK_GRAPH_API_KEY, __('Facebook Graph API Key', 'hri-reviews-importer'), 'hri-review-import-settings');
         $this->add_text_field(self::OPTION_FACEBOOK_PAGE_ID, __('Facebook Page ID', 'hri-reviews-importer'), 'hri-review-import-settings');
