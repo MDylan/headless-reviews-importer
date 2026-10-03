@@ -24,7 +24,11 @@ Facebook import is not tested yet.
 - **Minimum imported rating**: only ratings greater than or equal to this value are published.
 - **Imported languages** (short codes: `hu`, `en`, ...). On save, values like `hu_HU`, `en_US`, `de-DE` are normalized to short codes, and the site’s default language is always included.  
   See also: https://developers.google.com/maps/faq#languagesupport
-- Custom post type: **reviews** (dedicated admin menu).
+- **Google Places API version**: `Places API (Legacy)` (default), `Places API (New)` or `Business Profile API (OAuth)`.
+  - Business Profile API imports all reviews of a profile you manage, newest first. It uses an OAuth connection (client ID + secret, "Connect Google account" on the settings page) instead of the API key and Place ID, and Google has to approve Business Profile API access for the Cloud project. There are no per-language translations: the original text is stored in the first configured language field, the other language fields are only filled while they are empty.
+  - Legacy supports the **Import order** setting (newest / most relevant), but it can no longer be enabled in new Google Cloud projects.
+  - New returns at most 5 reviews, always sorted by relevance (there is no "newest" order), and the `reviews` field is billed under the Enterprise + Atmosphere SKU.
+- Custom post type: **reviews** (dedicated admin menu). Reviews have no public single pages and are not included in sitemaps; they remain available to query loops (e.g. Bricks) and the REST API.
   - Meta fields:  
     - `profile_photo_url` - The reviewer's profile photo
     - `review_number` (1–5) – rating  

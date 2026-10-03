@@ -30,6 +30,15 @@ class HRI_Review_Importer
     const OPTION_FACEBOOK_RATINGS_TOTAL = 'hri_facebook_ratings_total';
     const OPTION_LAST_ERROR = 'hri_last_error';
     const OPTION_IMPORT_ORDER = 'hri_import_order';
+    const OPTION_GOOGLE_API_VERSION = 'hri_google_api_version';
+    const OPTION_GBP_CLIENT_ID = 'hri_gbp_client_id';
+    const OPTION_GBP_CLIENT_SECRET = 'hri_gbp_client_secret';
+    const OPTION_GBP_LOCATION = 'hri_gbp_location';
+    const OPTION_GBP_TOKEN = 'hri_gbp_token';
+    const OPTION_GBP_LOCATIONS = 'hri_gbp_locations';
+
+    // Business Profile API: max. review pages (50 reviews each) fetched per run
+    const GBP_MAX_PAGES = 20;
 
 
     // Cron hook
@@ -74,6 +83,12 @@ class HRI_Review_Importer
         add_action('hri_run_import', array($this, 'hri_run_imports'));
 
         add_action('admin_post_hri_test_fb_connection', array($this, 'handle_test_fb_connection'));
+
+        // Google Business Profile (OAuth)
+        add_action('admin_post_hri_gbp_connect', array($this, 'handle_gbp_connect'));
+        add_action('admin_post_hri_gbp_oauth_callback', array($this, 'handle_gbp_oauth_callback'));
+        add_action('admin_post_hri_gbp_disconnect', array($this, 'handle_gbp_disconnect'));
+        add_action('admin_post_hri_gbp_fetch_locations', array($this, 'handle_gbp_fetch_locations'));
     }
 
     /**
@@ -125,6 +140,10 @@ class HRI_Review_Importer
         $this->hri_set_option_autoload(self::OPTION_LAST_RUN,   '', false);
         $this->hri_set_option_autoload(self::OPTION_SKIP_EMPTY_REVIEWS,   1, false);
         $this->hri_set_option_autoload(self::OPTION_IMPORT_ORDER,   'newest', false);
+        $this->hri_set_option_autoload(self::OPTION_GOOGLE_API_VERSION,   'legacy', false);
+        $this->hri_set_option_autoload(self::OPTION_GBP_CLIENT_ID,   '', false);
+        $this->hri_set_option_autoload(self::OPTION_GBP_CLIENT_SECRET,   '', false);
+        $this->hri_set_option_autoload(self::OPTION_GBP_LOCATION,   '', false);
         $this->hri_set_option_autoload(self::OPTION_LAST_ERROR,   array(), false);
     }
 
@@ -172,10 +191,30 @@ class HRI_Review_Importer
             'sanitize_callback' => array($this, 'sanitize_text'),
             'default'           => '',
         ));
+        register_setting('hri_settings_group', self::OPTION_GOOGLE_API_VERSION, array(
+            'type'              => 'string',
+            'sanitize_callback' => array($this, 'sanitize_google_api_version'),
+            'default'           => 'legacy',
+        ));
         register_setting('hri_settings_group', self::OPTION_IMPORT_ORDER, array(
             'type'              => 'string',
             'sanitize_callback' => array($this, 'sanitize_import_order'),
             'default'           => 'newest',
+        ));
+        register_setting('hri_settings_group', self::OPTION_GBP_CLIENT_ID, array(
+            'type'              => 'string',
+            'sanitize_callback' => array($this, 'sanitize_text'),
+            'default'           => '',
+        ));
+        register_setting('hri_settings_group', self::OPTION_GBP_CLIENT_SECRET, array(
+            'type'              => 'string',
+            'sanitize_callback' => array($this, 'sanitize_text'),
+            'default'           => '',
+        ));
+        register_setting('hri_settings_group', self::OPTION_GBP_LOCATION, array(
+            'type'              => 'string',
+            'sanitize_callback' => array($this, 'sanitize_text'),
+            'default'           => '',
         ));
         register_setting('hri_settings_group', self::OPTION_CRON_TIME, array(
             'type'              => 'string',
@@ -219,9 +258,10 @@ class HRI_Review_Importer
                     '<ul style="margin-top:0;"><li>%s <a href="%s" target="_blank" rel="noopener">%s</a></li><li>%s</li></ul>',
                     esc_html__('Use:', 'hri-reviews-importer'),
                     esc_url('https://developers.google.com/maps/documentation/places/web-service/get-api-key'),
-                    esc_html__('Get an API key (Places API). You need the Legacy Places API for this plugin', 'hri-reviews-importer'),
+                    esc_html__('Get an API key (Places API).', 'hri-reviews-importer'),
                     esc_html__('Then follow the explained steps.', 'hri-reviews-importer')
                 );
+                echo '<p>' . esc_html__('Enable the API that matches the "Google Places API version" setting below. Places API (Legacy) can no longer be enabled in new Google Cloud projects; Places API (New) returns at most 5 reviews sorted by relevance and cannot return the newest ones.', 'hri-reviews-importer') . '</p>';
 
                 echo '<p><strong>' . esc_html__('How to find the required Place ID:', 'hri-reviews-importer') . '</strong></p>';
                 printf(
@@ -243,14 +283,36 @@ class HRI_Review_Importer
         $this->add_text_field(self::OPTION_GOOGLE_PLACE_ID, __('Google Place ID', 'hri-reviews-importer'), 'hri-review-import-settings', __('Your Google Place ID', 'hri-reviews-importer'));
 
         add_settings_field(
+            self::OPTION_GOOGLE_API_VERSION,
+            esc_html__('Google Places API version', 'hri-reviews-importer'),
+            array($this, 'render_google_api_version_select'),
+            'hri-review-import-settings',
+            'hri_settings_section',
+            array(
+                'description' => esc_html__('Use "Places API (New)" if your Google Cloud project cannot enable the Legacy API. "Business Profile API" imports all reviews (newest first) of a profile you manage; it needs the OAuth connection below instead of the API key and Place ID.', 'hri-reviews-importer'),
+            )
+        );
+
+        add_settings_field(
             self::OPTION_IMPORT_ORDER,
             esc_html__('Import order', 'hri-reviews-importer'),
             array($this, 'render_import_order_select'),
             'hri-review-import-settings',
             'hri_settings_section',
             array(
-                'description' => esc_html__('Defines the order used when fetching reviews from Google Places.', 'hri-reviews-importer'),
+                'description' => esc_html__('Defines the order used when fetching reviews from Google Places. Only applies to the Legacy API; Places API (New) always returns the most relevant reviews.', 'hri-reviews-importer'),
             )
+        );
+
+        $this->add_text_field(self::OPTION_GBP_CLIENT_ID, __('Business Profile OAuth client ID', 'hri-reviews-importer'), 'hri-review-import-settings', __('Only for the Business Profile API.', 'hri-reviews-importer'));
+        $this->add_text_field(self::OPTION_GBP_CLIENT_SECRET, __('Business Profile OAuth client secret', 'hri-reviews-importer'), 'hri-review-import-settings', __('Only for the Business Profile API.', 'hri-reviews-importer'));
+
+        add_settings_field(
+            self::OPTION_GBP_LOCATION,
+            esc_html__('Business Profile location', 'hri-reviews-importer'),
+            array($this, 'render_gbp_location_field'),
+            'hri-review-import-settings',
+            'hri_settings_section'
         );
 
         add_settings_field(
@@ -321,6 +383,59 @@ class HRI_Review_Importer
     {
         $value = is_string($value) ? strtolower(trim($value)) : 'newest';
         return in_array($value, array('newest', 'most_relevant'), true) ? $value : 'newest';
+    }
+
+    public function render_google_api_version_select($args)
+    {
+        $current = get_option(self::OPTION_GOOGLE_API_VERSION, 'legacy');
+
+        echo '<select id="' . esc_attr(self::OPTION_GOOGLE_API_VERSION) . '" name="' . esc_attr(self::OPTION_GOOGLE_API_VERSION) . '">';
+        printf(
+            '<option value="legacy"%s>%s</option>',
+            selected($current, 'legacy', false),
+            esc_html__('Places API (Legacy)', 'hri-reviews-importer')
+        );
+        printf(
+            '<option value="new"%s>%s</option>',
+            selected($current, 'new', false),
+            esc_html__('Places API (New)', 'hri-reviews-importer')
+        );
+        printf(
+            '<option value="gbp"%s>%s</option>',
+            selected($current, 'gbp', false),
+            esc_html__('Business Profile API (OAuth)', 'hri-reviews-importer')
+        );
+        echo '</select>';
+
+        if (! empty($args['description'])) {
+            echo '<p class="description">' . esc_html($args['description']) . '</p>';
+        }
+    }
+
+    public function sanitize_google_api_version($value)
+    {
+        $value = is_string($value) ? strtolower(trim($value)) : 'legacy';
+        return in_array($value, array('legacy', 'new', 'gbp'), true) ? $value : 'legacy';
+    }
+
+    public function render_gbp_location_field()
+    {
+        $value     = get_option(self::OPTION_GBP_LOCATION, '');
+        $locations = get_option(self::OPTION_GBP_LOCATIONS, array());
+
+        printf(
+            '<input type="text" class="regular-text" id="%1$s" name="%1$s" value="%2$s" list="%1$s_list" placeholder="accounts/123/locations/456" />',
+            esc_attr(self::OPTION_GBP_LOCATION),
+            esc_attr($value)
+        );
+        if (is_array($locations) && ! empty($locations)) {
+            echo '<datalist id="' . esc_attr(self::OPTION_GBP_LOCATION) . '_list">';
+            foreach ($locations as $location) {
+                printf('<option value="%s">%s</option>', esc_attr($location['name']), esc_html($location['title']));
+            }
+            echo '</datalist>';
+        }
+        echo '<p class="description">' . esc_html__('Only for the Business Profile API. Format: accounts/{accountId}/locations/{locationId}. After connecting, "Fetch locations" below lists the available values.', 'hri-reviews-importer') . '</p>';
     }
 
 
@@ -419,6 +534,9 @@ class HRI_Review_Importer
                 </div>
             <?php endif; ?>
 
+            <h2><?php echo esc_html__('Google Business Profile connection', 'hri-reviews-importer'); ?></h2>
+            <?php $this->render_gbp_connection(); ?>
+
             <?php if (isset($_GET['hri_fbtest']) && $_GET['hri_fbtest'] === 'ok') : ?>
                 <div class="notice notice-success is-dismissible">
                     <p><?php echo esc_html__('Facebook connection test succeeded.', 'hri-reviews-importer'); ?></p>
@@ -442,6 +560,69 @@ class HRI_Review_Importer
                 <?php echo esc_html__('Enter one code per line (e.g. "hu", "en"). We also accept "hu_HU", "en_US" but they will be normalized to the short code on save.', 'hri-reviews-importer'); ?>
             </p>
         </div>
+    <?php
+    }
+
+    private function render_gbp_connection()
+    {
+        $token      = get_option(self::OPTION_GBP_TOKEN, array());
+        $connected  = is_array($token) && ! empty($token['refresh_token']);
+        $has_client = trim((string) get_option(self::OPTION_GBP_CLIENT_ID, '')) !== '' && trim((string) get_option(self::OPTION_GBP_CLIENT_SECRET, '')) !== '';
+        $locations  = get_option(self::OPTION_GBP_LOCATIONS, array());
+        $status     = isset($_GET['hri_gbp']) ? sanitize_key($_GET['hri_gbp']) : '';
+
+        $notices = array(
+            'connected'    => array('success', __('Connected to Google Business Profile.', 'hri-reviews-importer')),
+            'disconnected' => array('success', __('Disconnected from Google Business Profile.', 'hri-reviews-importer')),
+            'locations'    => array('success', __('Locations fetched. Set the "Business Profile location" field above and save.', 'hri-reviews-importer')),
+            'error'        => array('error', __('Google Business Profile action failed. See the "Last error" above.', 'hri-reviews-importer')),
+        );
+        if (isset($notices[$status])) {
+            printf('<div class="notice notice-%s is-dismissible"><p>%s</p></div>', esc_attr($notices[$status][0]), esc_html($notices[$status][1]));
+        }
+    ?>
+        <p><?php echo esc_html__('Only needed when "Google Places API version" is set to "Business Profile API (OAuth)".', 'hri-reviews-importer'); ?></p>
+        <ol>
+            <li><?php echo esc_html__('In your Google Cloud project (with approved Business Profile API access) enable: Google My Business API, My Business Account Management API, My Business Business Information API.', 'hri-reviews-importer'); ?></li>
+            <li><?php echo esc_html__('Create an OAuth client (type: Web application) with this authorized redirect URI:', 'hri-reviews-importer'); ?>
+                <code><?php echo esc_html($this->gbp_redirect_uri()); ?></code>
+            </li>
+            <li><?php echo esc_html__('Save the client ID and client secret above, then connect with a Google account that manages the Business Profile.', 'hri-reviews-importer'); ?></li>
+            <li><?php echo esc_html__('Fetch the locations, set the "Business Profile location" field and save.', 'hri-reviews-importer'); ?></li>
+        </ol>
+        <p><strong><?php echo esc_html__('Status:', 'hri-reviews-importer'); ?></strong>
+            <?php echo $connected ? esc_html__('connected', 'hri-reviews-importer') : esc_html__('not connected', 'hri-reviews-importer'); ?>
+        </p>
+
+        <?php if ($has_client) : ?>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                <?php wp_nonce_field('hri_gbp_connect', 'hri_gbp_connect_field'); ?>
+                <input type="hidden" name="action" value="hri_gbp_connect" />
+                <?php submit_button($connected ? esc_html__('Reconnect Google account', 'hri-reviews-importer') : esc_html__('Connect Google account', 'hri-reviews-importer'), 'secondary'); ?>
+            </form>
+        <?php else : ?>
+            <p><em><?php echo esc_html__('Save the OAuth client ID and client secret first.', 'hri-reviews-importer'); ?></em></p>
+        <?php endif; ?>
+
+        <?php if ($connected) : ?>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                <?php wp_nonce_field('hri_gbp_fetch_locations', 'hri_gbp_fetch_locations_field'); ?>
+                <input type="hidden" name="action" value="hri_gbp_fetch_locations" />
+                <?php submit_button(esc_html__('Fetch locations', 'hri-reviews-importer'), 'secondary'); ?>
+            </form>
+            <?php if (is_array($locations) && ! empty($locations)) : ?>
+                <ul>
+                    <?php foreach ($locations as $location) : ?>
+                        <li><?php echo esc_html($location['title']); ?>: <code><?php echo esc_html($location['name']); ?></code></li>
+                    <?php endforeach; ?>
+                </ul>
+            <?php endif; ?>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                <?php wp_nonce_field('hri_gbp_disconnect', 'hri_gbp_disconnect_field'); ?>
+                <input type="hidden" name="action" value="hri_gbp_disconnect" />
+                <?php submit_button(esc_html__('Disconnect', 'hri-reviews-importer'), 'delete'); ?>
+            </form>
+        <?php endif; ?>
     <?php
     }
 
@@ -562,7 +743,7 @@ class HRI_Review_Importer
             $query = array('hri_import' => 'error');
         }
 
-        wp_redirect(add_query_arg('hri_import', 'done', admin_url('options-general.php?page=hri-review-import-settings')));
+        wp_redirect(add_query_arg($query, admin_url('options-general.php?page=hri-review-import-settings')));
         exit;
     }
 
@@ -633,9 +814,10 @@ class HRI_Review_Importer
 
         $args = array(
             'labels'             => $labels,
-            'public'             => true,
+            'public'             => true, // must stay public: Bricks only lists public post types in the query loop
             'show_in_rest'       => true,
-            'publicly_queryable' => true,
+            'publicly_queryable' => false, // no single pages, keeps reviews out of sitemaps
+            'show_in_nav_menus'  => false,
             'rewrite'            => false,
             'exclude_from_search' => true,
             'show_ui'            => true,
@@ -869,139 +1051,563 @@ class HRI_Review_Importer
     public function hri_run_imports()
     {
         $langs = $this->get_imported_languages_short_array();
+        $errors = array();
 
         $google_api_key = trim((string) get_option(self::OPTION_GOOGLE_PLACES_API_KEY, ''));
         $google_place_id = trim((string) get_option(self::OPTION_GOOGLE_PLACE_ID, ''));
 
-        if (!empty($google_api_key) && !empty($google_place_id) && !empty($langs)) {
+        // Each language and Facebook run independently: one failure must not stop the rest.
+        if (get_option(self::OPTION_GOOGLE_API_VERSION, 'legacy') === 'gbp') {
+            try {
+                $this->hri_import_gbp_reviews();
+            } catch (\Throwable $e) {
+                $errors[] = 'Google (Business Profile): ' . $e->getMessage();
+            }
+        } elseif (!empty($google_api_key) && !empty($google_place_id) && !empty($langs)) {
             foreach ($langs as $lang) {
-                $this->hri_import_google_reviews($lang);
+                try {
+                    $this->hri_import_google_reviews($lang);
+                } catch (\Throwable $e) {
+                    $errors[] = 'Google (' . $lang . '): ' . $e->getMessage();
+                }
             }
         }
 
         //Facebook import
-        $this->hri_import_facebook_reviews();
+        try {
+            $this->hri_import_facebook_reviews();
+        } catch (\Throwable $e) {
+            $errors[] = 'Facebook: ' . $e->getMessage();
+        }
+
+        if (!empty($errors)) {
+            throw new \RuntimeException(implode(' | ', $errors));
+        }
     }
 
-    public function hri_import_google_reviews($language)
+    /**
+     * GET a Google endpoint and return the decoded JSON body.
+     *
+     * @param string $url
+     * @param array  $headers Extra request headers.
+     * @return array
+     * @throws \RuntimeException On transport errors, non-200 responses or invalid JSON.
+     */
+    private function google_get_json($url, $headers = array())
     {
+        $res = wp_remote_get($url, array(
+            'headers' => array_merge(array('Referer' => get_site_url()), $headers),
+            'timeout' => 20,
+        ));
+        if (is_wp_error($res)) {
+            throw new \RuntimeException('HTTP error: ' . $res->get_error_message());
+        }
 
-        $headers = [
-            'headers' => [
-                'Content-Type' => 'application/json',
-                'Referer' => get_site_url()
-            ],
-            'timeout' => 20
-        ];
+        $code = wp_remote_retrieve_response_code($res);
+        $data = json_decode(wp_remote_retrieve_body($res), true);
 
+        // Places API (New) error format
+        if (is_array($data) && !empty($data['error']['message'])) {
+            throw new \RuntimeException('API error: ' . $data['error']['message'] . ', Status: ' . ($data['error']['status'] ?? $code));
+        }
+        if ($code !== 200 || !is_array($data)) {
+            throw new \RuntimeException('Bad response (' . $code . ')');
+        }
+
+        return $data;
+    }
+
+    private function build_google_review($author_url, $time, $text, $author_name, $profile_photo_url, $rating, $review_id = null)
+    {
+        $time = (int) $time;
+
+        return array(
+            'review_id'            => ($review_id !== null) ? $review_id : md5(trim((string) $author_url) . $time),
+            'text'                 => trim((string) $text),
+            'author_name'          => trim((string) $author_name),
+            'review_time'          => $time,
+            'review_timestamp'     => date("Y-m-d H:i:s", $time),
+            'review_timestamp_gmt' => gmdate("Y-m-d H:i:s", $time),
+            'profile_photo_url'    => trim((string) $profile_photo_url),
+            'rating'               => $rating,
+        );
+    }
+
+    /** Places API (Legacy) – supports reviews_sort (newest / most_relevant) */
+    private function fetch_google_place_legacy($language)
+    {
         $google_api_key = trim((string) get_option(self::OPTION_GOOGLE_PLACES_API_KEY, ''));
         $google_place_id = trim((string) get_option(self::OPTION_GOOGLE_PLACE_ID, ''));
-        $skip_empty = (bool) get_option(self::OPTION_SKIP_EMPTY_REVIEWS, false);
-        $order = get_option(HRI_Review_Importer::OPTION_IMPORT_ORDER, 'newest');
+        $order = get_option(self::OPTION_IMPORT_ORDER, 'newest');
 
         $fields = array('formatted_address', 'icon', 'id', 'name', 'rating', 'reviews', 'url', 'user_ratings_total', 'vicinity');
-        // $language = "en";
 
         $url = 'https://maps.googleapis.com/maps/api/place/details/json'
             . '?placeid=' . rawurlencode($google_place_id)
             . '&key=' . rawurlencode($google_api_key)
             . '&fields=' . rawurlencode(implode(',', $fields))
-            . '&reviews_sort=' . $order // Last reviews first newest/most_relevant
+            . '&reviews_sort=' . rawurlencode($order) // Last reviews first newest/most_relevant
             . '&reviews_no_translations=false'
             . (($language != NULL) ? '&language=' . rawurlencode($language) : '');
-        //error_log("URL: " . $url);
-        if (version_compare(PHP_VERSION, '8.1') >= 0) {
-            $data_string = wp_remote_retrieve_body(@wp_remote_get($url, $headers));
-        } else {
-            $data_string = wp_remote_retrieve_body(wp_remote_get($url, $headers));
-        }
 
-        $data_array = ($data_string != NULL) ? json_decode($data_string, TRUE) : NULL;
-        //error_log('Google API response: ' . print_r($data_array, true));
+        $data = $this->google_get_json($url);
 
-        if (isset($data_array['error_message'])) {
-            //error_log('Google API error: ' . $data_array['error_message']);
-            $msg = 'Google API error: ' . $data_array['error_message'] . ', Status: ' . $data_array['status'];
+        $status = isset($data['status']) ? (string) $data['status'] : '';
+        if ($status !== 'OK') {
+            $msg = isset($data['error_message']) ? 'API error: ' . $data['error_message'] . ', Status: ' . $status : 'API error, Status: ' . $status;
             throw new \RuntimeException($msg);
-            return;
         }
+
+        $result = (isset($data['result']) && is_array($data['result'])) ? $data['result'] : array();
+
         $reviews = array();
-        if (isset($data_array['result']['reviews'])) {
-            $data = $data_array['result'];
-            foreach ($data['reviews'] as $key => $value) {
-                if ($skip_empty && empty(trim((string) $value['text']))) {
-                    continue; // skip this review
-                }
-                $review_id = md5(trim($value['author_url']) . trim($value['time']));
-                $reviews[$key]['review_id'] = $review_id;
-                $reviews[$key]['text'] = trim($value['text']);
-                $reviews[$key]['author_name'] = trim($value['author_name']);
-                $reviews[$key]['review_time'] = $value['time'];
-                $reviews[$key]['review_timestamp'] = date("Y-m-d H:i:s", $value['time']);
-                $reviews[$key]['review_timestamp_gmt'] = gmdate("Y-m-d H:i:s", $value['time']);
-                $reviews[$key]['profile_photo_url'] = trim($value['profile_photo_url']);
-                $reviews[$key]['rating'] = $value['rating'];
-            }
-        } else {
-            //error_log('Google API error: No reviews.');
-            $msg = 'Google API error: No reviews.';
-            throw new \RuntimeException($msg);
-            return;
+        foreach ((array) ($result['reviews'] ?? array()) as $value) {
+            $reviews[] = $this->build_google_review(
+                $value['author_url'] ?? '',
+                $value['time'] ?? 0,
+                $value['text'] ?? '',
+                $value['author_name'] ?? '',
+                $value['profile_photo_url'] ?? '',
+                $value['rating'] ?? 0
+            );
         }
 
-        if (isset($data_array['result']['rating'])) {
-            $raw_rating = isset($data_array['result']['rating']) ? $data_array['result']['rating'] : 0;
-            $new_rating = number_format((float) $raw_rating, 1, '.', '');
+        return array(
+            'rating'        => $result['rating'] ?? null,
+            'ratings_total' => $result['user_ratings_total'] ?? null,
+            'reviews'       => $reviews,
+        );
+    }
+
+    /** Places API (New) – max. 5 reviews, always sorted by relevance (no "newest" order) */
+    private function fetch_google_place_new($language)
+    {
+        $google_api_key = trim((string) get_option(self::OPTION_GOOGLE_PLACES_API_KEY, ''));
+        $google_place_id = trim((string) get_option(self::OPTION_GOOGLE_PLACE_ID, ''));
+
+        $url = 'https://places.googleapis.com/v1/places/' . rawurlencode($google_place_id)
+            . (($language != NULL) ? '?languageCode=' . rawurlencode($language) : '');
+
+        $data = $this->google_get_json($url, array(
+            'X-Goog-Api-Key'   => $google_api_key,
+            'X-Goog-FieldMask' => 'rating,userRatingCount,reviews',
+        ));
+
+        $reviews = array();
+        foreach ((array) ($data['reviews'] ?? array()) as $value) {
+            $time = isset($value['publishTime']) ? strtotime((string) $value['publishTime']) : false;
+            if (!$time) {
+                continue;
+            }
+
+            // Same author URL form as the Legacy API, so review_id stays identical for already imported reviews
+            $author_url = (string) ($value['authorAttribution']['uri'] ?? '');
+            if (preg_match('#/maps/contrib/(\d+)#', $author_url, $m)) {
+                $author_url = 'https://www.google.com/maps/contrib/' . $m[1] . '/reviews';
+            }
+
+            $text = (string) ($value['text']['text'] ?? '');
+            if (trim($text) === '') {
+                $text = (string) ($value['originalText']['text'] ?? '');
+            }
+
+            $reviews[] = $this->build_google_review(
+                $author_url,
+                $time,
+                $text,
+                $value['authorAttribution']['displayName'] ?? '',
+                $value['authorAttribution']['photoUri'] ?? '',
+                $value['rating'] ?? 0
+            );
+        }
+
+        return array(
+            'rating'        => $data['rating'] ?? null,
+            'ratings_total' => $data['userRatingCount'] ?? null,
+            'reviews'       => $reviews,
+        );
+    }
+
+    public function hri_import_google_reviews($language)
+    {
+        $api_version = get_option(self::OPTION_GOOGLE_API_VERSION, 'legacy');
+
+        $place = ($api_version === 'new')
+            ? $this->fetch_google_place_new($language)
+            : $this->fetch_google_place_legacy($language);
+
+        if ($place['rating'] !== null) {
+            $new_rating = number_format((float) $place['rating'], 1, '.', '');
             update_option(self::OPTION_GOOGLE_RATING, $new_rating);
         }
 
-        if (isset($data_array['result']['user_ratings_total'])) {
-            $new_rating = floatval($data_array['result']['user_ratings_total']);
+        if ($place['ratings_total'] !== null) {
+            $new_rating = floatval($place['ratings_total']);
 
             update_option(self::OPTION_GOOGLE_RATINGS_TOTAL, $new_rating);
         }
 
-        if (!empty($reviews)) {
-            $min_rating = (int) get_option(self::OPTION_MIN_REVIEW_RATING, 4);
-            foreach ($reviews as $review) {
-                $existing = get_posts([
-                    'post_type' => 'reviews',
-                    'post_status' => 'any',
-                    'meta_query' => [[
-                        'key'   => 'review_id',
-                        'value' => $review['review_id'],
-                    ]],
-                    'fields' => 'ids',
-                    'numberposts' => 1
+        // No reviews for this language is not an error: nothing to import.
+        $this->save_google_reviews($place['reviews'], $language);
+    }
+
+    /**
+     * Create/update Google review posts.
+     *
+     * @param array  $reviews        Normalized reviews (see build_google_review()).
+     * @param string $language       Language field that always receives the review text.
+     * @param array  $fill_languages Further language fields, only filled while they are empty.
+     * @return array Counts: 'new' (created posts), 'existing' (already imported posts).
+     */
+    private function save_google_reviews($reviews, $language, $fill_languages = array())
+    {
+        $skip_empty = (bool) get_option(self::OPTION_SKIP_EMPTY_REVIEWS, false);
+        $min_rating = (int) get_option(self::OPTION_MIN_REVIEW_RATING, 4);
+        $counts = array('new' => 0, 'existing' => 0);
+
+        foreach ($reviews as $review) {
+            if ($skip_empty && $review['text'] === '') {
+                continue; // skip this review
+            }
+
+            $existing = get_posts([
+                'post_type' => 'reviews',
+                'post_status' => 'any',
+                'meta_query' => [[
+                    'key'   => 'review_id',
+                    'value' => $review['review_id'],
+                ]],
+                'fields' => 'ids',
+                'numberposts' => 1
+            ]);
+
+            if (!$existing) {
+                $post_status = ($review['rating'] >= $min_rating) ? 'publish' : 'draft';
+
+                $post_id = wp_insert_post([
+                    'post_type'    => 'reviews',
+                    'post_title'   => $review['author_name'],
+                    'post_status'  => $post_status,
+                    'post_date' => $review['review_timestamp'],
+                    'post_date_gmt' => $review['review_timestamp_gmt']
                 ]);
-
-                if (!$existing) {
-                    $post_status = ($review['rating'] >= $min_rating) ? 'publish' : 'draft';
-
-                    $post_id = wp_insert_post([
-                        'post_type'    => 'reviews',
-                        'post_title'   => $review['author_name'],
-                        'post_status'  => $post_status,
-                        'post_date' => $review['review_timestamp'],
-                        'post_date_gmt' => $review['review_timestamp_gmt']
-                    ]);
-                } else {
-                    //update existing review
-                    $post_id =  $existing[0];
-                }
                 if ($post_id) {
-                    update_post_meta($post_id, 'review_number', $review['rating']);
-                    update_post_meta($post_id, 'review_timestamp', $review['review_timestamp']);
-                    update_post_meta($post_id, 'review_source', 'Google');
-                    update_post_meta($post_id, 'review_id', $review['review_id']);
-                    update_post_meta($post_id, 'review_' . $language, wp_kses_post($review['text']));
-                    update_post_meta($post_id, 'profile_photo_url', esc_url_raw($review['profile_photo_url']));
+                    $counts['new']++;
+                }
+            } else {
+                //update existing review
+                $post_id =  $existing[0];
+                $counts['existing']++;
+            }
+            if ($post_id) {
+                update_post_meta($post_id, 'review_number', $review['rating']);
+                update_post_meta($post_id, 'review_timestamp', $review['review_timestamp']);
+                update_post_meta($post_id, 'review_source', 'Google');
+                update_post_meta($post_id, 'review_id', $review['review_id']);
+                update_post_meta($post_id, 'review_' . $language, wp_kses_post($review['text']));
+                update_post_meta($post_id, 'profile_photo_url', esc_url_raw($review['profile_photo_url']));
+                foreach ($fill_languages as $lang) {
+                    if (get_post_meta($post_id, 'review_' . $lang, true) === '') {
+                        update_post_meta($post_id, 'review_' . $lang, wp_kses_post($review['text']));
+                    }
                 }
             }
-        } else {
-            $msg = 'There is no reviews with comment';
-            throw new \RuntimeException($msg);
         }
+
+        return $counts;
+    }
+
+    /* ---------- Google Business Profile API (OAuth) ---------- */
+
+    private function gbp_redirect_uri()
+    {
+        return admin_url('admin-post.php?action=hri_gbp_oauth_callback');
+    }
+
+    private function gbp_redirect_back($status)
+    {
+        wp_redirect(add_query_arg('hri_gbp', $status, admin_url('options-general.php?page=hri-review-import-settings')));
+        exit;
+    }
+
+    /**
+     * POST to Google's OAuth token endpoint (code exchange / refresh).
+     *
+     * @param array $params Grant specific parameters.
+     * @return array Decoded token response.
+     * @throws \RuntimeException
+     */
+    private function gbp_token_request($params)
+    {
+        $res = wp_remote_post('https://oauth2.googleapis.com/token', array(
+            'body'    => array_merge(array(
+                'client_id'     => trim((string) get_option(self::OPTION_GBP_CLIENT_ID, '')),
+                'client_secret' => trim((string) get_option(self::OPTION_GBP_CLIENT_SECRET, '')),
+            ), $params),
+            'timeout' => 20,
+        ));
+        if (is_wp_error($res)) {
+            throw new \RuntimeException('HTTP error: ' . $res->get_error_message());
+        }
+
+        $code = wp_remote_retrieve_response_code($res);
+        $data = json_decode(wp_remote_retrieve_body($res), true);
+
+        if ($code !== 200 || !is_array($data) || empty($data['access_token'])) {
+            $detail = '';
+            if (is_array($data)) {
+                $detail = trim((is_string($data['error'] ?? null) ? $data['error'] : '') . ' ' . (is_string($data['error_description'] ?? null) ? $data['error_description'] : ''));
+            }
+            throw new \RuntimeException('OAuth token error (' . $code . ')' . ($detail !== '' ? ': ' . $detail : ''));
+        }
+
+        return $data;
+    }
+
+    private function gbp_store_token($data, $refresh_token = '')
+    {
+        update_option(self::OPTION_GBP_TOKEN, array(
+            'access_token'  => (string) $data['access_token'],
+            'expires_at'    => time() + (int) ($data['expires_in'] ?? 3600),
+            // A refresh response has no refresh_token: keep the stored one.
+            'refresh_token' => (string) ($data['refresh_token'] ?? $refresh_token),
+        ), false);
+    }
+
+    private function gbp_get_access_token()
+    {
+        $token = get_option(self::OPTION_GBP_TOKEN, array());
+        if (!is_array($token) || empty($token['refresh_token'])) {
+            throw new \RuntimeException('Not connected. Connect a Google account on the settings page.');
+        }
+        if (!empty($token['access_token']) && (int) ($token['expires_at'] ?? 0) - 60 > time()) {
+            return $token['access_token'];
+        }
+
+        $data = $this->gbp_token_request(array(
+            'grant_type'    => 'refresh_token',
+            'refresh_token' => $token['refresh_token'],
+        ));
+        $this->gbp_store_token($data, $token['refresh_token']);
+
+        return (string) $data['access_token'];
+    }
+
+    private function gbp_get_json($url)
+    {
+        return $this->google_get_json($url, array('Authorization' => 'Bearer ' . $this->gbp_get_access_token()));
+    }
+
+    /** Collect a list that Google returns page by page under $key. */
+    private function gbp_get_paged($url, $key, $max_pages = 10)
+    {
+        $items = array();
+        $page_token = '';
+        for ($page = 0; $page < $max_pages; $page++) {
+            $data = $this->gbp_get_json($page_token !== '' ? add_query_arg('pageToken', rawurlencode($page_token), $url) : $url);
+            foreach ((array) ($data[$key] ?? array()) as $item) {
+                $items[] = $item;
+            }
+            $page_token = (string) ($data['nextPageToken'] ?? '');
+            if ($page_token === '') {
+                break;
+            }
+        }
+        return $items;
+    }
+
+    /**
+     * The API returns foreign-language comments as
+     * "(Translated by Google) …\n\n(Original)\n…": keep the original text only.
+     */
+    private function gbp_original_comment($comment)
+    {
+        $comment = trim((string) $comment);
+        if (preg_match('/^\(Translated by Google\).*?\(Original\)\s*(.*)$/su', $comment, $m)) {
+            return trim($m[1]);
+        }
+        return $comment;
+    }
+
+    public function hri_import_gbp_reviews()
+    {
+        $location = trim((string) get_option(self::OPTION_GBP_LOCATION, ''), " \t\n\r\0\x0B/");
+        if (!preg_match('#^accounts/[^/]+/locations/[^/]+$#', $location)) {
+            throw new \RuntimeException('Missing or invalid location. Expected format: accounts/{accountId}/locations/{locationId}');
+        }
+
+        // The API has no language parameter: the text goes to the first language,
+        // the other language fields are only filled while they are empty.
+        $langs = $this->get_imported_languages_short_array();
+        $stars = array('ONE' => 1, 'TWO' => 2, 'THREE' => 3, 'FOUR' => 4, 'FIVE' => 5);
+
+        $base = 'https://mybusiness.googleapis.com/v4/' . $location . '/reviews?pageSize=50&orderBy=' . rawurlencode('updateTime desc');
+        $page_token = '';
+
+        for ($page = 0; $page < self::GBP_MAX_PAGES; $page++) {
+            $data = $this->gbp_get_json($page_token !== '' ? $base . '&pageToken=' . rawurlencode($page_token) : $base);
+
+            if ($page === 0) {
+                if (isset($data['averageRating'])) {
+                    update_option(self::OPTION_GOOGLE_RATING, number_format((float) $data['averageRating'], 1, '.', ''));
+                }
+                if (isset($data['totalReviewCount'])) {
+                    update_option(self::OPTION_GOOGLE_RATINGS_TOTAL, floatval($data['totalReviewCount']));
+                }
+            }
+
+            $reviews = array();
+            foreach ((array) ($data['reviews'] ?? array()) as $value) {
+                $time = isset($value['createTime']) ? strtotime((string) $value['createTime']) : false;
+                if (empty($value['reviewId']) || !$time) {
+                    continue;
+                }
+                $reviews[] = $this->build_google_review(
+                    '',
+                    $time,
+                    $this->gbp_original_comment($value['comment'] ?? ''),
+                    $value['reviewer']['displayName'] ?? '',
+                    $value['reviewer']['profilePhotoUrl'] ?? '',
+                    $stars[$value['starRating'] ?? ''] ?? 0,
+                    'gbp:' . $value['reviewId']
+                );
+            }
+
+            $counts = $this->save_google_reviews($reviews, $langs[0], array_slice($langs, 1));
+
+            // Newest first: stop at the first page that only has already imported reviews.
+            $page_token = (string) ($data['nextPageToken'] ?? '');
+            if ($page_token === '' || ($counts['new'] === 0 && $counts['existing'] > 0)) {
+                break;
+            }
+        }
+    }
+
+    public function handle_gbp_connect()
+    {
+        if (! current_user_can('manage_options')) {
+            wp_die(esc_html__('Insufficient permissions.', 'hri-reviews-importer'));
+        }
+        check_admin_referer('hri_gbp_connect', 'hri_gbp_connect_field');
+
+        $client_id = trim((string) get_option(self::OPTION_GBP_CLIENT_ID, ''));
+        if ($client_id === '') {
+            $this->log_error('Missing OAuth client ID.', array('where' => 'handle_gbp_connect'));
+            $this->gbp_redirect_back('error');
+        }
+
+        wp_redirect('https://accounts.google.com/o/oauth2/v2/auth?' . http_build_query(array(
+            'client_id'     => $client_id,
+            'redirect_uri'  => $this->gbp_redirect_uri(),
+            'response_type' => 'code',
+            'scope'         => 'https://www.googleapis.com/auth/business.manage',
+            'access_type'   => 'offline',
+            'prompt'        => 'consent', // always returns a refresh token
+            'state'         => wp_create_nonce('hri_gbp_oauth'),
+        )));
+        exit;
+    }
+
+    public function handle_gbp_oauth_callback()
+    {
+        if (! current_user_can('manage_options')) {
+            wp_die(esc_html__('Insufficient permissions.', 'hri-reviews-importer'));
+        }
+
+        try {
+            $state = isset($_GET['state']) ? sanitize_text_field(wp_unslash($_GET['state'])) : '';
+            if (! wp_verify_nonce($state, 'hri_gbp_oauth')) {
+                throw new \RuntimeException('Invalid OAuth state. Start the connection again.');
+            }
+            if (! empty($_GET['error'])) {
+                throw new \RuntimeException('Google OAuth error: ' . sanitize_text_field(wp_unslash($_GET['error'])));
+            }
+            $code = isset($_GET['code']) ? sanitize_text_field(wp_unslash($_GET['code'])) : '';
+            if ($code === '') {
+                throw new \RuntimeException('Missing authorization code.');
+            }
+
+            $data = $this->gbp_token_request(array(
+                'grant_type'   => 'authorization_code',
+                'code'         => $code,
+                'redirect_uri' => $this->gbp_redirect_uri(),
+            ));
+            if (empty($data['refresh_token'])) {
+                throw new \RuntimeException('Google did not return a refresh token.');
+            }
+            $this->gbp_store_token($data);
+            $this->clear_last_error();
+            $status = 'connected';
+        } catch (\Throwable $e) {
+            $this->log_error($e->getMessage(), array('where' => 'handle_gbp_oauth_callback'));
+            $status = 'error';
+        }
+
+        $this->gbp_redirect_back($status);
+    }
+
+    public function handle_gbp_disconnect()
+    {
+        if (! current_user_can('manage_options')) {
+            wp_die(esc_html__('Insufficient permissions.', 'hri-reviews-importer'));
+        }
+        check_admin_referer('hri_gbp_disconnect', 'hri_gbp_disconnect_field');
+
+        $token = get_option(self::OPTION_GBP_TOKEN, array());
+        if (is_array($token) && ! empty($token['refresh_token'])) {
+            // Best effort: the local token is removed even if the revoke call fails.
+            wp_remote_post('https://oauth2.googleapis.com/revoke', array(
+                'body'    => array('token' => $token['refresh_token']),
+                'timeout' => 10,
+            ));
+        }
+        delete_option(self::OPTION_GBP_TOKEN);
+        delete_option(self::OPTION_GBP_LOCATIONS);
+
+        $this->gbp_redirect_back('disconnected');
+    }
+
+    public function handle_gbp_fetch_locations()
+    {
+        if (! current_user_can('manage_options')) {
+            wp_die(esc_html__('Insufficient permissions.', 'hri-reviews-importer'));
+        }
+        check_admin_referer('hri_gbp_fetch_locations', 'hri_gbp_fetch_locations_field');
+
+        try {
+            $locations = array();
+            $accounts = $this->gbp_get_paged('https://mybusinessaccountmanagement.googleapis.com/v1/accounts', 'accounts');
+            foreach ($accounts as $account) {
+                if (empty($account['name'])) {
+                    continue;
+                }
+                $url = 'https://mybusinessbusinessinformation.googleapis.com/v1/' . $account['name'] . '/locations?readMask=name,title&pageSize=100';
+                foreach ($this->gbp_get_paged($url, 'locations') as $location) {
+                    if (empty($location['name'])) {
+                        continue;
+                    }
+                    $locations[] = array(
+                        'name'  => $account['name'] . '/' . $location['name'],
+                        'title' => (string) ($location['title'] ?? ''),
+                    );
+                }
+            }
+            if (empty($locations)) {
+                throw new \RuntimeException('No Business Profile locations found for this Google account.');
+            }
+
+            update_option(self::OPTION_GBP_LOCATIONS, $locations, false);
+            if (count($locations) === 1 && trim((string) get_option(self::OPTION_GBP_LOCATION, '')) === '') {
+                update_option(self::OPTION_GBP_LOCATION, $locations[0]['name']);
+            }
+            $this->clear_last_error();
+            $status = 'locations';
+        } catch (\Throwable $e) {
+            $this->log_error($e->getMessage(), array('where' => 'handle_gbp_fetch_locations'));
+            $status = 'error';
+        }
+
+        $this->gbp_redirect_back($status);
     }
 
     private function log_error($message, $context = array())
@@ -1056,22 +1662,19 @@ class HRI_Review_Importer
         while ($url) {
             $res = wp_remote_get($url, array('timeout' => 20));
             if (is_wp_error($res)) {
-                error_log('HRI FB import: HTTP error – ' . $res->get_error_message());
-                return;
+                throw new \RuntimeException('HTTP error: ' . $res->get_error_message());
             }
 
             $code = wp_remote_retrieve_response_code($res);
             $body = json_decode(wp_remote_retrieve_body($res), true);
 
             if ($code !== 200 || !is_array($body)) {
-                error_log('HRI FB import: Bad response (' . $code . '): ' . substr((string) wp_remote_retrieve_body($res), 0, 500));
-                return;
+                throw new \RuntimeException('Bad response (' . $code . '): ' . substr((string) wp_remote_retrieve_body($res), 0, 500));
             }
 
             // Facebook hibaüzenet?
             if (!empty($body['error']['message'])) {
-                error_log('HRI FB import: Graph API error – ' . $body['error']['message']);
-                return;
+                throw new \RuntimeException('Graph API error: ' . $body['error']['message']);
             }
 
             foreach ((array) ($body['data'] ?? []) as $item) {
