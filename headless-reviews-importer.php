@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Headless Google/Facebook Reviews Importer
  * Description: Settings page (Facebook/Google keys, import frequency, imported languages, minimum rating), "Import now" button, last run display + "reviews" custom post type with meta fields and list columns.
- * Version:     0.9.0
+ * Version:     1.1.0
  * Author:      Molnár Dávid
  * License:     GPLv2 or later
  * Text Domain: hri-reviews-importer
