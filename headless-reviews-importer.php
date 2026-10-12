@@ -61,6 +61,7 @@ class HRI_Review_Importer
         // Admin UI
         add_action('admin_menu', array($this, 'add_menu'));
         add_action('admin_init', array($this, 'register_settings'));
+        add_filter('plugin_action_links_' . plugin_basename(__FILE__), array($this, 'add_settings_link'));
 
         // Import now (admin-post)
         add_action('admin_post_hri_import_now', array($this, 'handle_import_now'));
@@ -170,6 +171,17 @@ class HRI_Review_Importer
             'hri-review-import-settings',
             array($this, 'render_settings_page')
         );
+    }
+
+    /** "Settings" link on the Plugins screen */
+    public function add_settings_link($links)
+    {
+        array_unshift($links, sprintf(
+            '<a href="%s">%s</a>',
+            esc_url(admin_url('options-general.php?page=hri-review-import-settings')),
+            esc_html__('Settings', 'hri-reviews-importer')
+        ));
+        return $links;
     }
 
     public function register_settings()
