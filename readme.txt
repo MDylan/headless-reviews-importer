@@ -17,15 +17,16 @@ Facebook import is not tested yet.
 
 **Headless Google/Facebook Reviews Importer** is a developer-friendly plugin that prepares the infrastructure for importing reviews (Google / Facebook):
 
-- Settings page under **Settings → Reviews Import Settings**.
+- Settings page under **Settings → Reviews Import Settings**, with tabs (Google, Facebook, Import, Advanced) and a status bar (last run, next run, **Import now**). The Google tab only shows the fields of the selected API.
 - API keys: `facebook_graph_api_key`, `facebook_page_id`, `google_places_api_key`, `google_place_id`.
+- Keys and tokens (Places API key, OAuth client secret, Facebook Page Access Token) are write-only on the settings page: a saved value is never sent back to the browser, only its last 4 characters are shown. Leave the field empty to keep the saved value; **Change** replaces it, **Delete** removes it.
 - Import frequency (hourly / twice daily / daily) + **"Import now"** button.
 - **Last run** display.
 - **Minimum imported rating**: only ratings greater than or equal to this value are published.
 - **Imported languages** (short codes: `hu`, `en`, ...). On save, values like `hu_HU`, `en_US`, `de-DE` are normalized to short codes, and the site’s default language is always included.  
   See also: https://developers.google.com/maps/faq#languagesupport
 - **Google Places API version**: `Places API (Legacy)` (default), `Places API (New)` or `Business Profile API (OAuth)`.
-  - Business Profile API imports all reviews of a profile you manage, newest first. It uses an OAuth connection (client ID + secret, "Connect Google account" on the settings page) instead of the API key and Place ID, and Google has to approve Business Profile API access for the Cloud project. Each configured language is requested separately (`Accept-Language` header): reviews written in that language are stored as written, the others with Google's translation into it. The first run, and the first run after changing the location or the languages, fetches all reviews; later runs only the newest ones.
+  - Business Profile API imports all reviews of a profile you manage, newest first. It uses an OAuth connection (client ID + secret, "Connect Google account" on the settings page) instead of the API key and Place ID, and Google has to approve Business Profile API access for the Cloud project. After connecting, the locations of the Google account are fetched automatically and can be chosen from a list (a single location is selected by itself). Each configured language is requested separately (`Accept-Language` header): reviews written in that language are stored as written, the others with Google's translation into it. The first run, and the first run after changing the location or the languages, fetches all reviews; later runs only the newest ones.
   - Legacy supports the **Import order** setting (newest / most relevant), but it can no longer be enabled in new Google Cloud projects.
   - New returns at most 5 reviews, always sorted by relevance (there is no "newest" order), and the `reviews` field is billed under the Enterprise + Atmosphere SKU.
 - Custom post type: **reviews** (dedicated admin menu). Reviews have no public single pages and are not included in sitemaps; they remain available to query loops (e.g. Bricks) and the REST API.

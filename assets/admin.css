@@ -1,0 +1,178 @@
+/*
+ * Settings page (Settings → Reviews Import Settings).
+ * Everything that hides something is tied to body.js: without JavaScript every tab and field stays visible.
+ */
+
+.hri-settings .form-table .regular-text {
+    width: 32em;
+    max-width: 100%;
+}
+
+.hri-settings .form-table .hri-uri {
+    width: 46em;
+    max-width: 100%;
+}
+
+/* Badge and buttons in one line */
+.hri-inline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Status bar */
+.hri-status {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 32px;
+    margin: 16px 0 20px;
+    padding: 12px 16px;
+    background: #fff;
+    border: 1px solid #c3c4c7;
+    border-left: 4px solid #2271b1;
+    box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
+}
+
+.hri-status-items {
+    display: flex;
+    flex: 1;
+    flex-wrap: wrap;
+    gap: 8px 32px;
+    margin: 0;
+}
+
+.hri-status-items dt {
+    color: #646970;
+    font-size: 12px;
+}
+
+.hri-status-items dd {
+    margin: 0;
+    font-weight: 600;
+}
+
+/* Tabs */
+.no-js .hri-tabs,
+.js .hri-panel:not(.is-active) {
+    display: none;
+}
+
+.js .hri-panel-title {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+}
+
+/* Google tab: rows of the other APIs (data-api follows the chosen "Source API") */
+.js .hri-panel[data-api="legacy"] .hri-for:not(.hri-for-legacy),
+.js .hri-panel[data-api="new"] .hri-for:not(.hri-for-new),
+.js .hri-panel[data-api="gbp"] .hri-for:not(.hri-for-gbp) {
+    display: none;
+}
+
+/* Source API choices */
+.hri-choices {
+    display: grid;
+    gap: 8px;
+    max-width: 46em;
+}
+
+.hri-choice {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    background: #fff;
+    border: 1px solid #c3c4c7;
+    border-radius: 4px;
+}
+
+.hri-choice input {
+    margin: 2px 0 0;
+}
+
+.hri-choice strong,
+.hri-choice .description {
+    display: block;
+}
+
+.hri-choice:has(input:checked) {
+    background: #f0f6fc;
+    border-color: #2271b1;
+    box-shadow: 0 0 0 1px #2271b1;
+}
+
+/* Status badges */
+.hri-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.6;
+    vertical-align: middle;
+}
+
+.hri-badge-ok {
+    background: #edfaef;
+    color: #007017;
+}
+
+.hri-badge-off {
+    background: #f0f0f1;
+    color: #50575e;
+}
+
+/* Write-only fields: saved hint + Change / Delete, the input only while changing */
+.hri-secret,
+.hri-secret > span {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.js .hri-secret.has-value .hri-secret-edit,
+.js .hri-secret-pending,
+.js .hri-secret-clear,
+.no-js .hri-secret-pending,
+.no-js .hri-secret button,
+.js .hri-secret.is-editing .hri-secret-idle,
+.js .hri-secret.is-clearing .hri-secret-idle {
+    display: none;
+}
+
+.js .hri-secret.is-editing .hri-secret-edit,
+.js .hri-secret.is-clearing .hri-secret-pending {
+    display: flex;
+}
+
+.hri-secret.is-clearing .hri-secret-saved code {
+    text-decoration: line-through;
+    opacity: 0.6;
+}
+
+.no-js .hri-copy {
+    display: none;
+}
+
+/* Next to the action buttons while the settings form has unsaved changes */
+.hri-dirty-note {
+    color: #646970;
+    font-style: italic;
+}
+
+/* Setup guide */
+.hri-help summary {
+    color: #2271b1;
+    cursor: pointer;
+}
+
+.hri-help ol {
+    max-width: 50em;
+    margin: 8px 0 0 1.5em;
+}

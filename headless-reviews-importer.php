@@ -52,6 +52,9 @@ class HRI_Review_Importer
     // Cron hook
     const CRON_HOOK = 'hri_import_cron_event';
 
+    // Hook suffix of the settings page (set in add_menu())
+    private $settings_hook = '';
+
     public function __construct()
     {
         // I18n
@@ -60,6 +63,7 @@ class HRI_Review_Importer
         // Admin UI
         add_action('admin_menu', array($this, 'add_menu'));
         add_action('admin_init', array($this, 'register_settings'));
+        add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_assets'));
         add_filter('plugin_action_links_' . plugin_basename(__FILE__), array($this, 'add_settings_link'));
 
         // Import now (admin-post)
@@ -169,13 +173,30 @@ class HRI_Review_Importer
     /** Admin menu + settings */
     public function add_menu()
     {
-        add_options_page(
+        $this->settings_hook = add_options_page(
             esc_html__('Reviews Import Settings', 'hri-reviews-importer'),
             esc_html__('Reviews Import Settings', 'hri-reviews-importer'),
             'manage_options',
             'hri-review-import-settings',
             array($this, 'render_settings_page')
         );
+    }
+
+    /** CSS + JS of the settings page */
+    public function enqueue_admin_assets($hook)
+    {
+        if (! $this->settings_hook || $hook !== $this->settings_hook) {
+            return;
+        }
+
+        $header = get_file_data(__FILE__, array('version' => 'Version'));
+
+        wp_enqueue_style('hri-admin', plugins_url('assets/admin.css', __FILE__), array(), $header['version']);
+        wp_enqueue_script('hri-admin', plugins_url('assets/admin.js', __FILE__), array(), $header['version'], true);
+        wp_localize_script('hri-admin', 'hriAdmin', array(
+            'copied'    => __('Copied', 'hri-reviews-importer'),
+            'saveFirst' => __('Save your changes first.', 'hri-reviews-importer'),
+        ));
     }
 
     /** "Settings" link on the Plugins screen */
@@ -191,17 +212,17 @@ class HRI_Review_Importer
 
     public function register_settings()
     {
-        register_setting('hri_settings_group', self::OPTION_FACEBOOK_GRAPH_API_KEY, array(
-            'type'              => 'string',
-            'sanitize_callback' => array($this, 'sanitize_text'),
-            'default'           => '',
-        ));
+        // Keys and tokens: write-only fields (see render_secret_field())
+        foreach (array(self::OPTION_FACEBOOK_GRAPH_API_KEY, self::OPTION_GOOGLE_PLACES_API_KEY, self::OPTION_GBP_CLIENT_SECRET) as $secret) {
+            register_setting('hri_settings_group', $secret, array(
+                'type'              => 'string',
+                'sanitize_callback' => function ($value) use ($secret) {
+                    return $this->sanitize_secret($secret, $value);
+                },
+                'default'           => '',
+            ));
+        }
         register_setting('hri_settings_group', self::OPTION_FACEBOOK_PAGE_ID, array(
-            'type'              => 'string',
-            'sanitize_callback' => array($this, 'sanitize_text'),
-            'default'           => '',
-        ));
-        register_setting('hri_settings_group', self::OPTION_GOOGLE_PLACES_API_KEY, array(
             'type'              => 'string',
             'sanitize_callback' => array($this, 'sanitize_text'),
             'default'           => '',
@@ -222,11 +243,6 @@ class HRI_Review_Importer
             'default'           => 'newest',
         ));
         register_setting('hri_settings_group', self::OPTION_GBP_CLIENT_ID, array(
-            'type'              => 'string',
-            'sanitize_callback' => array($this, 'sanitize_text'),
-            'default'           => '',
-        ));
-        register_setting('hri_settings_group', self::OPTION_GBP_CLIENT_SECRET, array(
             'type'              => 'string',
             'sanitize_callback' => array($this, 'sanitize_text'),
             'default'           => '',
@@ -262,131 +278,47 @@ class HRI_Review_Importer
             'default'           => false,
         ));
 
-        add_settings_section(
-            'hri_settings_section',
-            esc_html__('Import & API settings', 'hri-reviews-importer'),
-            function () {
-                echo '<p>' . esc_html__('Provide API keys, import schedule, and imported languages.', 'hri-reviews-importer') . '</p>';
-                echo '<p><strong>' . esc_html__('Languages note:', 'hri-reviews-importer') . '</strong> ' .
-                    esc_html__('from formats like "hu_HU", "en_US" only the short code is used ("hu", "en"). On save we normalize to the short code. Field cannot be empty and the site default language is always ensured.', 'hri-reviews-importer') .
-                    '</p>';
-                printf(
-                    '<p>%s <a href="%s" target="_blank" rel="noopener">%s</a></p>',
-                    esc_html__('See:', 'hri-reviews-importer'),
-                    esc_url('https://developers.google.com/maps/faq#languagesupport'),
-                    esc_html__('Google Maps – Language support', 'hri-reviews-importer')
-                );
+        // Rows of the Google tab that only belong to some of the APIs (see admin.css)
+        $places = array('class' => 'hri-for hri-for-legacy hri-for-new');
+        $gbp    = array('class' => 'hri-for hri-for-gbp');
 
-                // --- Added note blocks ---
-                echo '<p><strong>' . esc_html__('How to get the required Google Places API Key:', 'hri-reviews-importer') . '</strong></p>';
-                printf(
-                    '<ul style="margin-top:0;"><li>%s <a href="%s" target="_blank" rel="noopener">%s</a></li><li>%s</li></ul>',
-                    esc_html__('Use:', 'hri-reviews-importer'),
-                    esc_url('https://developers.google.com/maps/documentation/places/web-service/get-api-key'),
-                    esc_html__('Get an API key (Places API).', 'hri-reviews-importer'),
-                    esc_html__('Then follow the explained steps.', 'hri-reviews-importer')
-                );
-                echo '<p>' . esc_html__('Enable the API that matches the "Google Places API version" setting below. Places API (Legacy) can no longer be enabled in new Google Cloud projects; Places API (New) returns at most 5 reviews sorted by relevance and cannot return the newest ones.', 'hri-reviews-importer') . '</p>';
+        $this->add_field(self::OPTION_GOOGLE_API_VERSION, __('Source API', 'hri-reviews-importer'), 'google', 'render_google_api_version_field');
+        $this->add_field(self::OPTION_GOOGLE_PLACES_API_KEY, __('Google Places API key', 'hri-reviews-importer'), 'google', 'render_secret_field', $places + array(
+            'desc'      => __('Enable the selected Places API in your Google Cloud project, then create a key for it.', 'hri-reviews-importer'),
+            'link_url'  => 'https://developers.google.com/maps/documentation/places/web-service/get-api-key',
+            'link_text' => __('Get an API key (Places API).', 'hri-reviews-importer'),
+        ));
+        $this->add_field(self::OPTION_GOOGLE_PLACE_ID, __('Google Place ID', 'hri-reviews-importer'), 'google', 'render_text_field', $places + array(
+            'desc'      => __('The ID of the business on Google Maps.', 'hri-reviews-importer'),
+            'link_url'  => 'https://developers.google.com/maps/documentation/places/web-service/place-id',
+            'link_text' => __('Place IDs documentation', 'hri-reviews-importer'),
+        ));
+        $this->add_field(self::OPTION_IMPORT_ORDER, __('Import order', 'hri-reviews-importer'), 'google', 'render_import_order_select', array(
+            'class'       => 'hri-for hri-for-legacy',
+            'description' => __('Which reviews Google returns (at most 5): the newest or the most relevant ones.', 'hri-reviews-importer'),
+        ));
 
-                echo '<p><strong>' . esc_html__('How to find the required Place ID:', 'hri-reviews-importer') . '</strong></p>';
-                printf(
-                    '<ul style="margin-top:0;"><li>%s <a href="%s" target="_blank" rel="noopener">%s</a></li><li>%s</li></ul>',
-                    esc_html__('Use:', 'hri-reviews-importer'),
-                    esc_url('https://developers.google.com/maps/documentation/places/web-service/place-id'),
-                    esc_html__('Place IDs documentation', 'hri-reviews-importer'),
-                    esc_html__('Search for the desired business name.', 'hri-reviews-importer')
-                );
-                // --- /Added note blocks ---
-            },
-            'hri-review-import-settings'
-        );
+        $this->add_field('hri_gbp_guide', __('Setup guide', 'hri-reviews-importer'), 'google', 'render_gbp_guide_field', $gbp);
+        $this->add_field('hri_gbp_redirect_uri', __('Authorized redirect URI', 'hri-reviews-importer'), 'google', 'render_gbp_redirect_uri_field', $gbp);
+        $this->add_field(self::OPTION_GBP_CLIENT_ID, __('Business Profile OAuth client ID', 'hri-reviews-importer'), 'google', 'render_text_field', $gbp);
+        $this->add_field(self::OPTION_GBP_CLIENT_SECRET, __('Business Profile OAuth client secret', 'hri-reviews-importer'), 'google', 'render_secret_field', $gbp);
+        $this->add_field('hri_gbp_connection', __('Google account', 'hri-reviews-importer'), 'google', 'render_gbp_connection_field', $gbp);
+        $this->add_field(self::OPTION_GBP_LOCATION, __('Business Profile location', 'hri-reviews-importer'), 'google', 'render_gbp_location_field', $gbp);
 
+        $this->add_field(self::OPTION_FACEBOOK_PAGE_ID, __('Facebook Page ID', 'hri-reviews-importer'), 'facebook', 'render_text_field');
+        $this->add_field(self::OPTION_FACEBOOK_GRAPH_API_KEY, __('Facebook Page Access Token', 'hri-reviews-importer'), 'facebook', 'render_secret_field');
+        $this->add_field('hri_fb_test', __('Connection test', 'hri-reviews-importer'), 'facebook', 'render_fb_test_field');
 
-        $this->add_text_field(self::OPTION_FACEBOOK_GRAPH_API_KEY, __('Facebook Graph API Key', 'hri-reviews-importer'), 'hri-review-import-settings');
-        $this->add_text_field(self::OPTION_FACEBOOK_PAGE_ID, __('Facebook Page ID', 'hri-reviews-importer'), 'hri-review-import-settings');
-        $this->add_text_field(self::OPTION_GOOGLE_PLACES_API_KEY, __('Google Places API key', 'hri-reviews-importer'), 'hri-review-import-settings', __('Paste your Places API key here.', 'hri-reviews-importer'));
-        $this->add_text_field(self::OPTION_GOOGLE_PLACE_ID, __('Google Place ID', 'hri-reviews-importer'), 'hri-review-import-settings', __('Your Google Place ID', 'hri-reviews-importer'));
+        $this->add_field(self::OPTION_CRON_TIME, __('Import frequency', 'hri-reviews-importer'), 'import', 'render_cron_select');
+        $this->add_field(self::OPTION_MIN_REVIEW_RATING, __('Minimum imported rating', 'hri-reviews-importer'), 'import', 'render_min_rating');
+        $this->add_field(self::OPTION_IMPORTED_LANGUAGES, __('Imported languages (short codes)', 'hri-reviews-importer'), 'import', 'render_languages_textarea');
+        $this->add_field(self::OPTION_SKIP_EMPTY_REVIEWS, __('Skip empty reviews', 'hri-reviews-importer'), 'import', 'render_checkbox_field', array(
+            'label' => __('If checked, reviews without a text comment will be skipped.', 'hri-reviews-importer'),
+        ));
 
-        add_settings_field(
-            self::OPTION_GOOGLE_API_VERSION,
-            esc_html__('Google Places API version', 'hri-reviews-importer'),
-            array($this, 'render_google_api_version_select'),
-            'hri-review-import-settings',
-            'hri_settings_section',
-            array(
-                'description' => esc_html__('Use "Places API (New)" if your Google Cloud project cannot enable the Legacy API. "Business Profile API" imports all reviews (newest first) of a profile you manage; it needs the OAuth connection below instead of the API key and Place ID.', 'hri-reviews-importer'),
-            )
-        );
-
-        add_settings_field(
-            self::OPTION_IMPORT_ORDER,
-            esc_html__('Import order', 'hri-reviews-importer'),
-            array($this, 'render_import_order_select'),
-            'hri-review-import-settings',
-            'hri_settings_section',
-            array(
-                'description' => esc_html__('Defines the order used when fetching reviews from Google Places. Only applies to the Legacy API; Places API (New) always returns the most relevant reviews.', 'hri-reviews-importer'),
-            )
-        );
-
-        $this->add_text_field(self::OPTION_GBP_CLIENT_ID, __('Business Profile OAuth client ID', 'hri-reviews-importer'), 'hri-review-import-settings', __('Only for the Business Profile API.', 'hri-reviews-importer'));
-        $this->add_text_field(self::OPTION_GBP_CLIENT_SECRET, __('Business Profile OAuth client secret', 'hri-reviews-importer'), 'hri-review-import-settings', __('Only for the Business Profile API.', 'hri-reviews-importer'));
-
-        add_settings_field(
-            self::OPTION_GBP_LOCATION,
-            esc_html__('Business Profile location', 'hri-reviews-importer'),
-            array($this, 'render_gbp_location_field'),
-            'hri-review-import-settings',
-            'hri_settings_section'
-        );
-
-        add_settings_field(
-            self::OPTION_CRON_TIME,
-            esc_html__('Import frequency', 'hri-reviews-importer'),
-            array($this, 'render_cron_select'),
-            'hri-review-import-settings',
-            'hri_settings_section'
-        );
-
-        add_settings_field(
-            self::OPTION_MIN_REVIEW_RATING,
-            esc_html__('Minimum imported rating', 'hri-reviews-importer'),
-            array($this, 'render_min_rating'),
-            'hri-review-import-settings',
-            'hri_settings_section'
-        );
-
-        add_settings_field(
-            self::OPTION_IMPORTED_LANGUAGES,
-            esc_html__('Imported languages (short codes)', 'hri-reviews-importer'),
-            array($this, 'render_languages_textarea'),
-            'hri-review-import-settings',
-            'hri_settings_section'
-        );
-
-        add_settings_field(
-            self::OPTION_SKIP_EMPTY_REVIEWS,
-            esc_html__('Skip empty reviews', 'hri-reviews-importer'),
-            array($this, 'render_checkbox_field'),
-            'hri-review-import-settings',
-            'hri_settings_section',
-            array(
-                'option' => self::OPTION_SKIP_EMPTY_REVIEWS,
-                'label'  => esc_html__('If checked, reviews without a text comment will be skipped.', 'hri-reviews-importer'),
-            )
-        );
-
-        add_settings_field(
-            self::OPTION_UPDATE_PRERELEASES,
-            esc_html__('Pre-release updates', 'hri-reviews-importer'),
-            array($this, 'render_checkbox_field'),
-            'hri-review-import-settings',
-            'hri_settings_section',
-            array(
-                'option' => self::OPTION_UPDATE_PRERELEASES,
-                'label'  => esc_html__('If checked, pre-releases published on GitHub are offered as plugin updates too.', 'hri-reviews-importer'),
-            )
-        );
+        $this->add_field(self::OPTION_UPDATE_PRERELEASES, __('Pre-release updates', 'hri-reviews-importer'), 'advanced', 'render_checkbox_field', array(
+            'label' => __('If checked, pre-releases published on GitHub are offered as plugin updates too.', 'hri-reviews-importer'),
+        ));
 
         // Ensure default languages option has a value
         if ('' === get_option(self::OPTION_IMPORTED_LANGUAGES, '')) {
@@ -422,73 +354,163 @@ class HRI_Review_Importer
         return in_array($value, array('newest', 'most_relevant'), true) ? $value : 'newest';
     }
 
-    public function render_google_api_version_select($args)
+    /** Google APIs the reviews can be imported from: value => label, description */
+    private function google_api_versions()
     {
-        $current = get_option(self::OPTION_GOOGLE_API_VERSION, 'legacy');
+        return array(
+            'gbp'    => array(
+                'label' => __('Business Profile API (OAuth)', 'hri-reviews-importer'),
+                'desc'  => __('All reviews of a profile you manage, newest first. Needs an OAuth connection, and Google has to approve Business Profile API access for the Cloud project.', 'hri-reviews-importer'),
+            ),
+            'new'    => array(
+                'label' => __('Places API (New)', 'hri-reviews-importer'),
+                'desc'  => __('Needs an API key and a Place ID. At most 5 reviews, always the most relevant ones (there is no "newest" order).', 'hri-reviews-importer'),
+            ),
+            'legacy' => array(
+                'label' => __('Places API (Legacy)', 'hri-reviews-importer'),
+                'desc'  => __('Needs an API key and a Place ID. At most 5 reviews, the newest or the most relevant ones. Can no longer be enabled in new Google Cloud projects.', 'hri-reviews-importer'),
+            ),
+        );
+    }
 
-        echo '<select id="' . esc_attr(self::OPTION_GOOGLE_API_VERSION) . '" name="' . esc_attr(self::OPTION_GOOGLE_API_VERSION) . '">';
-        printf(
-            '<option value="legacy"%s>%s</option>',
-            selected($current, 'legacy', false),
-            esc_html__('Places API (Legacy)', 'hri-reviews-importer')
-        );
-        printf(
-            '<option value="new"%s>%s</option>',
-            selected($current, 'new', false),
-            esc_html__('Places API (New)', 'hri-reviews-importer')
-        );
-        printf(
-            '<option value="gbp"%s>%s</option>',
-            selected($current, 'gbp', false),
-            esc_html__('Business Profile API (OAuth)', 'hri-reviews-importer')
-        );
-        echo '</select>';
+    public function render_google_api_version_field()
+    {
+        $current = $this->sanitize_google_api_version(get_option(self::OPTION_GOOGLE_API_VERSION, 'legacy'));
 
-        if (! empty($args['description'])) {
-            echo '<p class="description">' . esc_html($args['description']) . '</p>';
+        printf('<div class="hri-choices" role="radiogroup" aria-label="%s">', esc_attr__('Source API', 'hri-reviews-importer'));
+        foreach ($this->google_api_versions() as $key => $api) {
+            printf(
+                '<label class="hri-choice"><input type="radio" name="%1$s" value="%2$s"%3$s /><span><strong>%4$s</strong><span class="description">%5$s</span></span></label>',
+                esc_attr(self::OPTION_GOOGLE_API_VERSION),
+                esc_attr($key),
+                checked($current, $key, false),
+                esc_html($api['label']),
+                esc_html($api['desc'])
+            );
         }
+        echo '</div>';
     }
 
     public function sanitize_google_api_version($value)
     {
         $value = is_string($value) ? strtolower(trim($value)) : 'legacy';
-        return in_array($value, array('legacy', 'new', 'gbp'), true) ? $value : 'legacy';
+        return array_key_exists($value, $this->google_api_versions()) ? $value : 'legacy';
+    }
+
+    public function render_gbp_guide_field()
+    {
+        // Open until the connection is made, out of the way afterwards
+        echo '<details class="hri-help"' . ($this->gbp_is_connected() ? '' : ' open') . '>';
+        echo '<summary>' . esc_html__('How to set up the Business Profile API', 'hri-reviews-importer') . '</summary>';
+        echo '<ol>';
+        echo '<li>' . esc_html__('In your Google Cloud project (with approved Business Profile API access) enable: Google My Business API, My Business Account Management API, My Business Business Information API.', 'hri-reviews-importer') . '</li>';
+        echo '<li>' . esc_html__('Create an OAuth client (type: Web application) with the authorized redirect URI below.', 'hri-reviews-importer') . '</li>';
+        echo '<li>' . esc_html__('Save the client ID and client secret, then connect with a Google account that manages the Business Profile.', 'hri-reviews-importer') . '</li>';
+        echo '<li>' . esc_html__('Choose the Business Profile location and save.', 'hri-reviews-importer') . '</li>';
+        echo '</ol>';
+        echo '</details>';
+    }
+
+    public function render_gbp_redirect_uri_field()
+    {
+        printf(
+            '<input type="text" class="code hri-uri" id="hri_gbp_redirect_uri" value="%s" readonly /> ',
+            esc_attr($this->gbp_redirect_uri())
+        );
+        printf(
+            '<button type="button" class="button hri-copy" data-hri-copy="hri_gbp_redirect_uri">%s</button>',
+            esc_html__('Copy', 'hri-reviews-importer')
+        );
+    }
+
+    public function render_gbp_connection_field()
+    {
+        $connected  = $this->gbp_is_connected();
+        $has_client = trim((string) get_option(self::OPTION_GBP_CLIENT_ID, '')) !== '' && trim((string) get_option(self::OPTION_GBP_CLIENT_SECRET, '')) !== '';
+
+        echo '<div class="hri-inline">';
+        printf(
+            '<span class="hri-badge %s">%s</span> ',
+            $connected ? 'hri-badge-ok' : 'hri-badge-off',
+            $connected ? esc_html__('Connected', 'hri-reviews-importer') : esc_html__('Not connected', 'hri-reviews-importer')
+        );
+        if ($has_client) {
+            $this->render_action_button('hri_gbp_connect', $connected ? __('Reconnect Google account', 'hri-reviews-importer') : __('Connect Google account', 'hri-reviews-importer'));
+        }
+        if ($connected) {
+            $this->render_action_button('hri_gbp_disconnect', __('Disconnect', 'hri-reviews-importer'), 'button-link button-link-delete');
+        }
+        echo '</div>';
+        if (! $has_client) {
+            echo '<p class="description">' . esc_html__('Save the OAuth client ID and client secret first.', 'hri-reviews-importer') . '</p>';
+        }
     }
 
     public function render_gbp_location_field()
     {
         $value     = get_option(self::OPTION_GBP_LOCATION, '');
         $locations = get_option(self::OPTION_GBP_LOCATIONS, array());
+        $has_list  = is_array($locations) && ! empty($locations);
 
-        printf(
-            '<input type="text" class="regular-text" id="%1$s" name="%1$s" value="%2$s" list="%1$s_list" placeholder="accounts/123/locations/456" />',
-            esc_attr(self::OPTION_GBP_LOCATION),
-            esc_attr($value)
-        );
-        if (is_array($locations) && ! empty($locations)) {
-            echo '<datalist id="' . esc_attr(self::OPTION_GBP_LOCATION) . '_list">';
+        if ($has_list) {
+            echo '<select id="' . esc_attr(self::OPTION_GBP_LOCATION) . '" name="' . esc_attr(self::OPTION_GBP_LOCATION) . '">';
+            echo '<option value="">' . esc_html__('— Select —', 'hri-reviews-importer') . '</option>';
+            $listed = false;
             foreach ($locations as $location) {
-                printf('<option value="%s">%s</option>', esc_attr($location['name']), esc_html($location['title']));
+                $listed = $listed || $location['name'] === $value;
+                printf(
+                    '<option value="%1$s"%2$s>%3$s</option>',
+                    esc_attr($location['name']),
+                    selected($value, $location['name'], false),
+                    esc_html($location['title'] !== '' ? $location['title'] . ' – ' . $location['name'] : $location['name'])
+                );
             }
-            echo '</datalist>';
+            // A saved location that is not in the fetched list (e.g. typed in earlier) must survive a save
+            if ($value !== '' && ! $listed) {
+                printf('<option value="%1$s" selected>%1$s</option>', esc_attr($value));
+            }
+            echo '</select> ';
+        } else {
+            printf(
+                '<input type="text" class="regular-text" id="%1$s" name="%1$s" value="%2$s" placeholder="accounts/123/locations/456" /> ',
+                esc_attr(self::OPTION_GBP_LOCATION),
+                esc_attr($value)
+            );
         }
-        echo '<p class="description">' . esc_html__('Only for the Business Profile API. Format: accounts/{accountId}/locations/{locationId}. After connecting, "Fetch locations" below lists the available values.', 'hri-reviews-importer') . '</p>';
+
+        if ($this->gbp_is_connected()) {
+            $this->render_action_button('hri_gbp_fetch_locations', $has_list ? __('Refresh list', 'hri-reviews-importer') : __('Fetch locations', 'hri-reviews-importer'));
+        }
+        if (! $has_list) {
+            echo '<p class="description">' . esc_html__('Format: accounts/{accountId}/locations/{locationId}. After connecting, the locations of the Google account can be chosen from a list.', 'hri-reviews-importer') . '</p>';
+        }
+    }
+
+    public function render_fb_test_field()
+    {
+        $this->render_action_button('hri_test_fb_connection', __('Test Facebook connection', 'hri-reviews-importer'));
+        echo '<p class="description">' . esc_html__('Tests the saved Page ID and access token.', 'hri-reviews-importer') . '</p>';
     }
 
 
-    private function add_text_field($option, $label, $page, $desc = '')
+    /**
+     * Add a field to a tab of the settings page.
+     *
+     * @param string $id       Option name, or any unique id for rows without an option.
+     * @param string $label
+     * @param string $tab      Key from settings_tabs().
+     * @param string $callback Name of the rendering method.
+     * @param array  $args     Passed to the callback; 'class' is set on the table row.
+     */
+    private function add_field($id, $label, $tab, $callback, $args = array())
     {
         add_settings_field(
-            $option,
+            $id,
             esc_html($label),
-            array($this, 'render_text_field'),
-            $page,
-            'hri_settings_section',
-            array(
-                'option'      => $option,
-                'placeholder' => '',
-                'desc'        => $desc,
-            )
+            array($this, $callback),
+            'hri-review-import-settings',
+            'hri_section_' . $tab,
+            array_merge(array('option' => $id), $args)
         );
     }
 
@@ -514,153 +536,184 @@ class HRI_Review_Importer
     }
 
 
+    /** Tabs of the settings page: key => label */
+    private function settings_tabs()
+    {
+        return array(
+            'google'   => __('Google', 'hri-reviews-importer'),
+            'facebook' => __('Facebook', 'hri-reviews-importer'),
+            'import'   => __('Import', 'hri-reviews-importer'),
+            'advanced' => __('Advanced', 'hri-reviews-importer'),
+        );
+    }
+
     public function render_settings_page()
     {
         if (! current_user_can('manage_options')) return;
 
-        $last_run = get_option(self::OPTION_LAST_RUN, '');
+        $tabs = $this->settings_tabs();
+        // Coming back from an action: open the tab its button is on
+        $forced = isset($_GET['hri_gbp']) ? 'google' : (isset($_GET['hri_fbtest']) ? 'facebook' : '');
+        $active = ($forced !== '') ? $forced : key($tabs);
+        $api    = $this->sanitize_google_api_version(get_option(self::OPTION_GOOGLE_API_VERSION, 'legacy'));
 ?>
-        <div class="wrap">
+        <div class="wrap hri-settings" <?php echo ($forced !== '') ? 'data-hri-forced-tab="1"' : ''; ?>>
             <h1><?php echo esc_html__('Reviews Import Settings', 'hri-reviews-importer'); ?></h1>
-
-            <form method="post" action="options.php">
-                <?php
-                settings_fields('hri_settings_group');
-                do_settings_sections('hri-review-import-settings');
-                submit_button(esc_html__('Save', 'hri-reviews-importer'));
-                ?>
-            </form>
-
-            <hr />
-            <h2><?php echo esc_html__('Import actions', 'hri-reviews-importer'); ?></h2>
-            <p><strong><?php echo esc_html__('Last run:', 'hri-reviews-importer'); ?></strong>
-                <?php echo $last_run ? esc_html($last_run) : esc_html__('not run yet', 'hri-reviews-importer'); ?>
-            </p>
-            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
-                <?php wp_nonce_field('hri_import_now_nonce', 'hri_import_now_nonce_field'); ?>
-                <input type="hidden" name="action" value="hri_import_now" />
-                <input type="hidden" name="sort_type" value="newest" />
-                <?php submit_button(esc_html__('Import now', 'hri-reviews-importer'), 'secondary'); ?>
-            </form>
-            <?php if (isset($_GET['hri_import']) && $_GET['hri_import'] === 'done') : ?>
-                <div class="notice notice-success is-dismissible">
-                    <p><?php echo esc_html__('Import executed.', 'hri-reviews-importer'); ?>
-                    </p>
-                </div>
-            <?php endif; ?>
+            <hr class="wp-header-end" />
 
             <?php
-            $last_error = get_option(self::OPTION_LAST_ERROR, array());
+            $this->render_notices();
+            $this->render_status_bar();
+            ?>
 
-            if (isset($_GET['hri_import']) && $_GET['hri_import'] === 'error') : ?>
-                <div class="notice notice-error is-dismissible">
-                    <p><?php echo esc_html__('Import failed. See the last error below.', 'hri-reviews-importer'); ?></p>
-                </div>
-            <?php endif; ?>
+            <nav class="nav-tab-wrapper hri-tabs">
+                <?php foreach ($tabs as $key => $label) : ?>
+                    <a href="#<?php echo esc_attr($key); ?>" class="nav-tab<?php echo ($key === $active) ? ' nav-tab-active' : ''; ?>"><?php echo esc_html($label); ?></a>
+                <?php endforeach; ?>
+            </nav>
 
-            <?php if (! empty($last_error) && ! empty($last_error['message'])) : ?>
-                <div class="notice notice-error">
-                    <p><strong><?php echo esc_html__('Last error', 'hri-reviews-importer'); ?>:</strong>
-                        <?php echo esc_html($last_error['message']); ?>
-                    </p>
-                    <?php if (! empty($last_error['time'])) : ?>
-                        <p><em><?php echo esc_html__('When', 'hri-reviews-importer'); ?>:</em>
-                            <?php echo esc_html($last_error['time']); ?>
-                        </p>
-                    <?php endif; ?>
-                </div>
-            <?php endif; ?>
+            <form method="post" action="options.php" class="hri-form">
+                <?php settings_fields('hri_settings_group'); ?>
 
-            <h2><?php echo esc_html__('Google Business Profile connection', 'hri-reviews-importer'); ?></h2>
-            <?php $this->render_gbp_connection(); ?>
+                <?php foreach ($tabs as $key => $label) : ?>
+                    <div class="hri-panel<?php echo ($key === $active) ? ' is-active' : ''; ?>" id="hri-tab-<?php echo esc_attr($key); ?>" <?php echo ('google' === $key) ? 'data-api="' . esc_attr($api) . '"' : ''; ?>>
+                        <h2 class="hri-panel-title"><?php echo esc_html($label); ?></h2>
+                        <?php if ('facebook' === $key) : ?>
+                            <p><?php echo esc_html__('The Facebook import has not been tested yet.', 'hri-reviews-importer'); ?></p>
+                        <?php endif; ?>
+                        <table class="form-table" role="presentation">
+                            <?php do_settings_fields('hri-review-import-settings', 'hri_section_' . $key); ?>
+                        </table>
+                    </div>
+                <?php endforeach; ?>
 
-            <?php if (isset($_GET['hri_fbtest']) && $_GET['hri_fbtest'] === 'ok') : ?>
-                <div class="notice notice-success is-dismissible">
-                    <p><?php echo esc_html__('Facebook connection test succeeded.', 'hri-reviews-importer'); ?></p>
-                </div>
-            <?php elseif (isset($_GET['hri_fbtest']) && $_GET['hri_fbtest'] === 'error') : ?>
-                <div class="notice notice-error is-dismissible">
-                    <p><?php echo esc_html__('Facebook connection test failed. See the "Last error" below.', 'hri-reviews-importer'); ?></p>
-                </div>
-            <?php endif; ?>
-
-            <h2><?php echo esc_html__('Facebook connection test', 'hri-reviews-importer'); ?></h2>
-            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
-                <?php wp_nonce_field('hri_test_fb', 'hri_test_fb_field'); ?>
-                <input type="hidden" name="action" value="hri_test_fb_connection" />
-                <?php submit_button(esc_html__('Test Facebook connection', 'hri-reviews-importer'), 'secondary'); ?>
+                <?php submit_button(esc_html__('Save', 'hri-reviews-importer')); ?>
             </form>
 
-
-            <hr />
-            <p><em><?php echo esc_html__('Tip:', 'hri-reviews-importer'); ?></em>
-                <?php echo esc_html__('Enter one code per line (e.g. "hu", "en"). We also accept "hu_HU", "en_US" but they will be normalized to the short code on save.', 'hri-reviews-importer'); ?>
-            </p>
+            <?php $this->render_action_forms(); ?>
         </div>
     <?php
     }
 
-    private function render_gbp_connection()
+    /** Results of the admin-post actions and the last stored error (WordPress moves notices below the page title) */
+    private function render_notices()
     {
-        $token      = get_option(self::OPTION_GBP_TOKEN, array());
-        $connected  = is_array($token) && ! empty($token['refresh_token']);
-        $has_client = trim((string) get_option(self::OPTION_GBP_CLIENT_ID, '')) !== '' && trim((string) get_option(self::OPTION_GBP_CLIENT_SECRET, '')) !== '';
-        $locations  = get_option(self::OPTION_GBP_LOCATIONS, array());
-        $status     = isset($_GET['hri_gbp']) ? sanitize_key($_GET['hri_gbp']) : '';
+        $choose_location = (trim((string) get_option(self::OPTION_GBP_LOCATION, '')) === '')
+            ? ' ' . __('Choose the Business Profile location and save.', 'hri-reviews-importer')
+            : '';
 
-        $notices = array(
-            'connected'    => array('success', __('Connected to Google Business Profile.', 'hri-reviews-importer')),
-            'disconnected' => array('success', __('Disconnected from Google Business Profile.', 'hri-reviews-importer')),
-            'locations'    => array('success', __('Locations fetched. Set the "Business Profile location" field above and save.', 'hri-reviews-importer')),
-            'error'        => array('error', __('Google Business Profile action failed. See the "Last error" above.', 'hri-reviews-importer')),
+        // Query argument of the redirect => value => notice type, message
+        $results = array(
+            'hri_import' => array(
+                'done'  => array('success', __('Import executed.', 'hri-reviews-importer')),
+                'error' => array('error', __('Import failed. See the last error below.', 'hri-reviews-importer')),
+            ),
+            'hri_fbtest' => array(
+                'ok'    => array('success', __('Facebook connection test succeeded.', 'hri-reviews-importer')),
+                'error' => array('error', __('Facebook connection test failed. See the "Last error" below.', 'hri-reviews-importer')),
+            ),
+            'hri_gbp'    => array(
+                'connected'    => array('success', __('Connected to Google Business Profile.', 'hri-reviews-importer') . $choose_location),
+                'disconnected' => array('success', __('Disconnected from Google Business Profile.', 'hri-reviews-importer')),
+                'locations'    => array('success', __('Locations fetched.', 'hri-reviews-importer') . $choose_location),
+                'error'        => array('error', __('Google Business Profile action failed. See the "Last error" below.', 'hri-reviews-importer')),
+            ),
         );
-        if (isset($notices[$status])) {
-            printf('<div class="notice notice-%s is-dismissible"><p>%s</p></div>', esc_attr($notices[$status][0]), esc_html($notices[$status][1]));
+        foreach ($results as $arg => $notices) {
+            $value = isset($_GET[$arg]) ? sanitize_key($_GET[$arg]) : '';
+            if (isset($notices[$value])) {
+                printf('<div class="notice notice-%s is-dismissible"><p>%s</p></div>', esc_attr($notices[$value][0]), esc_html($notices[$value][1]));
+            }
         }
-    ?>
-        <p><?php echo esc_html__('Only needed when "Google Places API version" is set to "Business Profile API (OAuth)".', 'hri-reviews-importer'); ?></p>
-        <ol>
-            <li><?php echo esc_html__('In your Google Cloud project (with approved Business Profile API access) enable: Google My Business API, My Business Account Management API, My Business Business Information API.', 'hri-reviews-importer'); ?></li>
-            <li><?php echo esc_html__('Create an OAuth client (type: Web application) with this authorized redirect URI:', 'hri-reviews-importer'); ?>
-                <code><?php echo esc_html($this->gbp_redirect_uri()); ?></code>
-            </li>
-            <li><?php echo esc_html__('Save the client ID and client secret above, then connect with a Google account that manages the Business Profile.', 'hri-reviews-importer'); ?></li>
-            <li><?php echo esc_html__('Fetch the locations, set the "Business Profile location" field and save.', 'hri-reviews-importer'); ?></li>
-        </ol>
-        <p><strong><?php echo esc_html__('Status:', 'hri-reviews-importer'); ?></strong>
-            <?php echo $connected ? esc_html__('connected', 'hri-reviews-importer') : esc_html__('not connected', 'hri-reviews-importer'); ?>
-        </p>
 
-        <?php if ($has_client) : ?>
-            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
-                <?php wp_nonce_field('hri_gbp_connect', 'hri_gbp_connect_field'); ?>
-                <input type="hidden" name="action" value="hri_gbp_connect" />
-                <?php submit_button($connected ? esc_html__('Reconnect Google account', 'hri-reviews-importer') : esc_html__('Connect Google account', 'hri-reviews-importer'), 'secondary'); ?>
-            </form>
-        <?php else : ?>
-            <p><em><?php echo esc_html__('Save the OAuth client ID and client secret first.', 'hri-reviews-importer'); ?></em></p>
-        <?php endif; ?>
+        $last_error = get_option(self::OPTION_LAST_ERROR, array());
+        if (! empty($last_error) && ! empty($last_error['message'])) : ?>
+            <div class="notice notice-error">
+                <p><strong><?php echo esc_html__('Last error', 'hri-reviews-importer'); ?>:</strong>
+                    <?php echo esc_html($last_error['message']); ?>
+                </p>
+                <?php if (! empty($last_error['time'])) : ?>
+                    <p><em><?php echo esc_html__('When', 'hri-reviews-importer'); ?>:</em>
+                        <?php echo esc_html($last_error['time']); ?>
+                    </p>
+                <?php endif; ?>
+            </div>
+        <?php endif;
+    }
 
-        <?php if ($connected) : ?>
-            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
-                <?php wp_nonce_field('hri_gbp_fetch_locations', 'hri_gbp_fetch_locations_field'); ?>
-                <input type="hidden" name="action" value="hri_gbp_fetch_locations" />
-                <?php submit_button(esc_html__('Fetch locations', 'hri-reviews-importer'), 'secondary'); ?>
-            </form>
-            <?php if (is_array($locations) && ! empty($locations)) : ?>
-                <ul>
-                    <?php foreach ($locations as $location) : ?>
-                        <li><?php echo esc_html($location['title']); ?>: <code><?php echo esc_html($location['name']); ?></code></li>
-                    <?php endforeach; ?>
-                </ul>
-            <?php endif; ?>
-            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
-                <?php wp_nonce_field('hri_gbp_disconnect', 'hri_gbp_disconnect_field'); ?>
-                <input type="hidden" name="action" value="hri_gbp_disconnect" />
-                <?php submit_button(esc_html__('Disconnect', 'hri-reviews-importer'), 'delete'); ?>
-            </form>
-        <?php endif; ?>
+    /** Last / next run, the Google rating of the last import and the "Import now" button */
+    private function render_status_bar()
+    {
+        $format   = get_option('date_format') . ' ' . get_option('time_format');
+        $last_run = get_option(self::OPTION_LAST_RUN, '');
+        $next_run = wp_next_scheduled(self::CRON_HOOK);
+
+        // The rating options hold placeholders until the first Google import
+        $has_google = (get_option(self::OPTION_GOOGLE_API_VERSION, 'legacy') === 'gbp')
+            ? $this->gbp_is_connected()
+            : (trim((string) get_option(self::OPTION_GOOGLE_PLACES_API_KEY, '')) !== '' && trim((string) get_option(self::OPTION_GOOGLE_PLACE_ID, '')) !== '');
+        ?>
+        <div class="hri-status">
+            <dl class="hri-status-items">
+                <div>
+                    <dt><?php echo esc_html__('Last run', 'hri-reviews-importer'); ?></dt>
+                    <dd><?php echo $last_run ? esc_html(mysql2date($format, $last_run)) : esc_html__('not run yet', 'hri-reviews-importer'); ?></dd>
+                </div>
+                <div>
+                    <dt><?php echo esc_html__('Next run', 'hri-reviews-importer'); ?></dt>
+                    <dd><?php echo $next_run ? esc_html(wp_date($format, $next_run)) : esc_html__('not scheduled', 'hri-reviews-importer'); ?></dd>
+                </div>
+                <?php if ($last_run && $has_google) : ?>
+                    <div>
+                        <dt><?php echo esc_html__('Google rating', 'hri-reviews-importer'); ?></dt>
+                        <dd><?php
+                            /* translators: 1: average rating, 2: number of ratings */
+                            echo esc_html(sprintf(__('%1$s (%2$s ratings)', 'hri-reviews-importer'), get_option(self::OPTION_GOOGLE_RATING, ''), number_format_i18n((float) get_option(self::OPTION_GOOGLE_RATINGS_TOTAL, 0))));
+                            ?></dd>
+                    </div>
+                <?php endif; ?>
+            </dl>
+            <?php $this->render_action_button('hri_import_now', __('Import now', 'hri-reviews-importer')); ?>
+        </div>
     <?php
+    }
+
+    /**
+     * The admin-post actions of the page. A form cannot be nested into the settings form, so these
+     * are empty forms after it and the buttons point to them (see render_action_button()).
+     */
+    private function render_action_forms()
+    {
+        // admin-post action => nonce action, nonce field
+        $forms = array(
+            'hri_import_now'          => array('hri_import_now_nonce', 'hri_import_now_nonce_field'),
+            'hri_test_fb_connection'  => array('hri_test_fb', 'hri_test_fb_field'),
+            'hri_gbp_connect'         => array('hri_gbp_connect', 'hri_gbp_connect_field'),
+            'hri_gbp_fetch_locations' => array('hri_gbp_fetch_locations', 'hri_gbp_fetch_locations_field'),
+            'hri_gbp_disconnect'      => array('hri_gbp_disconnect', 'hri_gbp_disconnect_field'),
+        );
+        foreach ($forms as $action => $nonce) {
+            printf('<form method="post" action="%s" id="hri-form-%s">', esc_url(admin_url('admin-post.php')), esc_attr($action));
+            wp_nonce_field($nonce[0], $nonce[1]);
+            printf('<input type="hidden" name="action" value="%s" /></form>', esc_attr($action));
+        }
+    }
+
+    /** Submit button of an admin-post action; works anywhere on the page, inside the settings form too */
+    private function render_action_button($action, $label, $class = 'button')
+    {
+        printf(
+            '<button type="submit" class="%s hri-action" form="hri-form-%s">%s</button> ',
+            esc_attr($class),
+            esc_attr($action),
+            esc_html($label)
+        );
+    }
+
+    private function gbp_is_connected()
+    {
+        $token = get_option(self::OPTION_GBP_TOKEN, array());
+        return is_array($token) && ! empty($token['refresh_token']);
     }
 
     /** Renderers */
@@ -668,7 +721,6 @@ class HRI_Review_Importer
     {
         $option      = $args['option'] ?? '';
         $placeholder = $args['placeholder'] ?? '';
-        $desc        = $args['desc'] ?? '';
         $value       = get_option($option, '');
         printf(
             '<input type="text" class="regular-text" id="%1$s" name="%1$s" value="%2$s" placeholder="%3$s" />',
@@ -676,8 +728,67 @@ class HRI_Review_Importer
             esc_attr($value),
             esc_attr($placeholder)
         );
-        if ($desc) {
-            printf('<p class="description">%s</p>', esc_html($desc));
+        $this->render_field_description($args);
+    }
+
+    /**
+     * Write-only field for keys and tokens: the saved value is never printed, only that there is one.
+     * An empty field keeps the saved value (see sanitize_secret()).
+     */
+    public function render_secret_field($args)
+    {
+        $option = $args['option'] ?? '';
+        $value  = trim((string) get_option($option, ''));
+        $saved  = ($value !== '');
+        $input  = sprintf(
+            '<input type="password" class="regular-text hri-secret-input" id="%1$s" name="%1$s" value="" autocomplete="new-password" spellcheck="false" />',
+            esc_attr($option)
+        );
+
+        if (! $saved) {
+            echo '<div class="hri-secret">' . $input . '</div>';
+        } else {
+            // The last characters are enough to tell two long keys apart
+            $hint = str_repeat('•', 8) . (strlen($value) >= 12 ? substr($value, -4) : '');
+        ?>
+            <div class="hri-secret has-value">
+                <span class="hri-secret-saved">
+                    <span class="hri-badge hri-badge-ok"><?php echo esc_html__('Saved', 'hri-reviews-importer'); ?></span>
+                    <code><?php echo esc_html($hint); ?></code>
+                </span>
+                <span class="hri-secret-idle">
+                    <button type="button" class="button hri-secret-change"><?php echo esc_html__('Change', 'hri-reviews-importer'); ?></button>
+                    <button type="button" class="button-link button-link-delete hri-secret-delete"><?php echo esc_html__('Delete', 'hri-reviews-importer'); ?></button>
+                </span>
+                <span class="hri-secret-edit">
+                    <?php echo $input; ?>
+                    <button type="button" class="button hri-secret-cancel"><?php echo esc_html__('Cancel', 'hri-reviews-importer'); ?></button>
+                    <span class="description"><?php echo esc_html__('Leave empty to keep the saved value.', 'hri-reviews-importer'); ?></span>
+                </span>
+                <span class="hri-secret-pending">
+                    <span class="description"><?php echo esc_html__('Will be deleted when you save.', 'hri-reviews-importer'); ?></span>
+                    <button type="button" class="button hri-secret-undo"><?php echo esc_html__('Undo', 'hri-reviews-importer'); ?></button>
+                </span>
+                <label class="hri-secret-clear">
+                    <input type="checkbox" name="hri_clear_secret[<?php echo esc_attr($option); ?>]" value="1" />
+                    <?php echo esc_html__('Delete the saved value', 'hri-reviews-importer'); ?>
+                </label>
+            </div>
+<?php
+        }
+        $this->render_field_description($args);
+    }
+
+    /** Help text below a field: 'desc', optionally followed by a link ('link_url' + 'link_text') */
+    private function render_field_description($args)
+    {
+        $desc = $args['desc'] ?? '';
+        $link = '';
+        if (! empty($args['link_url'])) {
+            $link = sprintf('<a href="%s" target="_blank" rel="noopener">%s</a>', esc_url($args['link_url']), esc_html($args['link_text'] ?? $args['link_url']));
+        }
+        if ($desc !== '' || $link !== '') {
+            echo '<p class="description">' . trim(esc_html($desc) . ' ' . $link) . '</p>';
         }
     }
 
@@ -726,17 +837,40 @@ class HRI_Review_Importer
     {
         $value = get_option(self::OPTION_IMPORTED_LANGUAGES, $this->get_default_lang_short());
         printf(
-            '<textarea id="%1$s" name="%1$s" rows="6" cols="60" class="large-text code">%2$s</textarea>',
+            '<textarea id="%1$s" name="%1$s" rows="4" cols="20" class="code">%2$s</textarea>',
             esc_attr(self::OPTION_IMPORTED_LANGUAGES),
             esc_textarea($value)
         );
-        echo '<p class="description">' . esc_html__('One code per line (e.g., "hu", "en"). "hu_HU", "en_US" are also accepted and will be normalized to short codes on save.', 'hri-reviews-importer') . '</p>';
+        $this->render_field_description(array(
+            'desc'      => __('One code per line (e.g., "hu", "en"). "hu_HU", "en_US" are also accepted and will be normalized to short codes on save. The default language of the site is always included.', 'hri-reviews-importer'),
+            'link_url'  => 'https://developers.google.com/maps/faq#languagesupport',
+            'link_text' => __('Google Maps – Language support', 'hri-reviews-importer'),
+        ));
     }
 
     /** Sanitizers */
     public function sanitize_text($value)
     {
         return is_string($value) ? trim($value) : '';
+    }
+
+    /**
+     * The settings form never gets the saved value of a write-only field (see render_secret_field()),
+     * so it sends an empty one unless a new value was typed in: empty keeps the saved value there.
+     */
+    private function sanitize_secret($option, $value)
+    {
+        $value = is_string($value) ? trim($value) : '';
+
+        // Everything else that saves the option (e.g. hri_set_option_autoload()) means its empty value
+        if ($value !== '' || ! isset($_POST['option_page']) || $_POST['option_page'] !== 'hri_settings_group') {
+            return $value;
+        }
+        if (isset($_POST['hri_clear_secret']) && is_array($_POST['hri_clear_secret']) && ! empty($_POST['hri_clear_secret'][$option])) {
+            return '';
+        }
+
+        return (string) get_option($option, '');
     }
 
     public function sanitize_cron_time($value)
@@ -1626,6 +1760,12 @@ class HRI_Review_Importer
             }
             $this->gbp_store_token($data);
             $this->clear_last_error();
+            // Best effort: the connection stands even if the locations cannot be listed ("Fetch locations" retries it)
+            try {
+                $this->gbp_fetch_locations();
+            } catch (\Throwable $e) {
+                $this->log_error($e->getMessage(), array('where' => 'gbp_fetch_locations'));
+            }
             $status = 'connected';
         } catch (\Throwable $e) {
             $this->log_error($e->getMessage(), array('where' => 'handle_gbp_oauth_callback'));
@@ -1656,6 +1796,40 @@ class HRI_Review_Importer
         $this->gbp_redirect_back('disconnected');
     }
 
+    /**
+     * Store the locations of every account the connected Google user has access to.
+     *
+     * @throws \RuntimeException When the request fails or there is no location.
+     */
+    private function gbp_fetch_locations()
+    {
+        $locations = array();
+        $accounts = $this->gbp_get_paged('https://mybusinessaccountmanagement.googleapis.com/v1/accounts', 'accounts');
+        foreach ($accounts as $account) {
+            if (empty($account['name'])) {
+                continue;
+            }
+            $url = 'https://mybusinessbusinessinformation.googleapis.com/v1/' . $account['name'] . '/locations?readMask=name,title&pageSize=100';
+            foreach ($this->gbp_get_paged($url, 'locations') as $location) {
+                if (empty($location['name'])) {
+                    continue;
+                }
+                $locations[] = array(
+                    'name'  => $account['name'] . '/' . $location['name'],
+                    'title' => (string) ($location['title'] ?? ''),
+                );
+            }
+        }
+        if (empty($locations)) {
+            throw new \RuntimeException(__('No Business Profile locations found for this Google account.', 'hri-reviews-importer'));
+        }
+
+        update_option(self::OPTION_GBP_LOCATIONS, $locations, false);
+        if (count($locations) === 1 && trim((string) get_option(self::OPTION_GBP_LOCATION, '')) === '') {
+            update_option(self::OPTION_GBP_LOCATION, $locations[0]['name']);
+        }
+    }
+
     public function handle_gbp_fetch_locations()
     {
         if (! current_user_can('manage_options')) {
@@ -1664,31 +1838,7 @@ class HRI_Review_Importer
         check_admin_referer('hri_gbp_fetch_locations', 'hri_gbp_fetch_locations_field');
 
         try {
-            $locations = array();
-            $accounts = $this->gbp_get_paged('https://mybusinessaccountmanagement.googleapis.com/v1/accounts', 'accounts');
-            foreach ($accounts as $account) {
-                if (empty($account['name'])) {
-                    continue;
-                }
-                $url = 'https://mybusinessbusinessinformation.googleapis.com/v1/' . $account['name'] . '/locations?readMask=name,title&pageSize=100';
-                foreach ($this->gbp_get_paged($url, 'locations') as $location) {
-                    if (empty($location['name'])) {
-                        continue;
-                    }
-                    $locations[] = array(
-                        'name'  => $account['name'] . '/' . $location['name'],
-                        'title' => (string) ($location['title'] ?? ''),
-                    );
-                }
-            }
-            if (empty($locations)) {
-                throw new \RuntimeException(__('No Business Profile locations found for this Google account.', 'hri-reviews-importer'));
-            }
-
-            update_option(self::OPTION_GBP_LOCATIONS, $locations, false);
-            if (count($locations) === 1 && trim((string) get_option(self::OPTION_GBP_LOCATION, '')) === '') {
-                update_option(self::OPTION_GBP_LOCATION, $locations[0]['name']);
-            }
+            $this->gbp_fetch_locations();
             $this->clear_last_error();
             $status = 'locations';
         } catch (\Throwable $e) {
