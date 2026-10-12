@@ -52,12 +52,6 @@ class HRI_Review_Importer
     // Cron hook
     const CRON_HOOK = 'hri_import_cron_event';
 
-    private $cron_options = array(
-        'hourly'     => 'Hourly',
-        'twicedaily' => 'Twice daily',
-        'daily'      => 'Daily',
-    );
-
     public function __construct()
     {
         // I18n
@@ -310,7 +304,7 @@ class HRI_Review_Importer
 
         $this->add_text_field(self::OPTION_FACEBOOK_GRAPH_API_KEY, __('Facebook Graph API Key', 'hri-reviews-importer'), 'hri-review-import-settings');
         $this->add_text_field(self::OPTION_FACEBOOK_PAGE_ID, __('Facebook Page ID', 'hri-reviews-importer'), 'hri-review-import-settings');
-        $this->add_text_field(self::OPTION_GOOGLE_PLACES_API_KEY, __('Google Places API key', 'hri-reviews-importer'), 'hri-review-import-settings', __('Paste here your Places API API key.', 'hri-reviews-importer'));
+        $this->add_text_field(self::OPTION_GOOGLE_PLACES_API_KEY, __('Google Places API key', 'hri-reviews-importer'), 'hri-review-import-settings', __('Paste your Places API key here.', 'hri-reviews-importer'));
         $this->add_text_field(self::OPTION_GOOGLE_PLACE_ID, __('Google Place ID', 'hri-reviews-importer'), 'hri-review-import-settings', __('Your Google Place ID', 'hri-reviews-importer'));
 
         add_settings_field(
@@ -687,11 +681,21 @@ class HRI_Review_Importer
         }
     }
 
+    /** Import frequencies: WP-Cron schedule => label */
+    private function cron_options()
+    {
+        return array(
+            'hourly'     => __('Hourly', 'hri-reviews-importer'),
+            'twicedaily' => __('Twice daily', 'hri-reviews-importer'),
+            'daily'      => __('Daily', 'hri-reviews-importer'),
+        );
+    }
+
     public function render_cron_select()
     {
         $current = get_option(self::OPTION_CRON_TIME, 'hourly');
         echo '<select id="' . esc_attr(self::OPTION_CRON_TIME) . '" name="' . esc_attr(self::OPTION_CRON_TIME) . '">';
-        foreach ($this->cron_options as $key => $label) {
+        foreach ($this->cron_options() as $key => $label) {
             printf(
                 '<option value="%1$s"%3$s>%2$s</option>',
                 esc_attr($key),
@@ -738,7 +742,7 @@ class HRI_Review_Importer
     public function sanitize_cron_time($value)
     {
         $value = is_string($value) ? trim($value) : '';
-        return array_key_exists($value, $this->cron_options) ? $value : 'hourly';
+        return array_key_exists($value, $this->cron_options()) ? $value : 'hourly';
     }
 
     public function sanitize_min_rating($value)
@@ -961,6 +965,7 @@ class HRI_Review_Importer
             $key   = 'review_' . $lang;
             $value = get_post_meta($post->ID, $key, true);
             echo '<tr>';
+            /* translators: %s: language short code, e.g. "hu" */
             echo '<th><label for="' . esc_attr($key) . '">' . sprintf(esc_html__('review_%s', 'hri-reviews-importer'), esc_html($lang)) . '</label></th>';
             echo '<td><textarea id="' . esc_attr($key) . '" name="' . esc_attr($key) . '" rows="3" class="large-text">' . esc_textarea($value) . '</textarea></td>';
             echo '</tr>';
@@ -1143,7 +1148,8 @@ class HRI_Review_Importer
             'timeout' => 20,
         ));
         if (is_wp_error($res)) {
-            throw new \RuntimeException('HTTP error: ' . $res->get_error_message());
+            /* translators: %s: error message */
+            throw new \RuntimeException(sprintf(__('HTTP error: %s', 'hri-reviews-importer'), $res->get_error_message()));
         }
 
         $code = wp_remote_retrieve_response_code($res);
@@ -1151,10 +1157,12 @@ class HRI_Review_Importer
 
         // Places API (New) error format
         if (is_array($data) && !empty($data['error']['message'])) {
-            throw new \RuntimeException('API error: ' . $data['error']['message'] . ', Status: ' . ($data['error']['status'] ?? $code));
+            /* translators: 1: error message, 2: status */
+            throw new \RuntimeException(sprintf(__('API error: %1$s, Status: %2$s', 'hri-reviews-importer'), $data['error']['message'], $data['error']['status'] ?? $code));
         }
         if ($code !== 200 || !is_array($data)) {
-            throw new \RuntimeException('Bad response (' . $code . ')');
+            /* translators: %s: HTTP response code */
+            throw new \RuntimeException(sprintf(__('Bad response (%s)', 'hri-reviews-importer'), $code));
         }
 
         return $data;
@@ -1197,7 +1205,13 @@ class HRI_Review_Importer
 
         $status = isset($data['status']) ? (string) $data['status'] : '';
         if ($status !== 'OK') {
-            $msg = isset($data['error_message']) ? 'API error: ' . $data['error_message'] . ', Status: ' . $status : 'API error, Status: ' . $status;
+            if (isset($data['error_message'])) {
+                /* translators: 1: error message, 2: status */
+                $msg = sprintf(__('API error: %1$s, Status: %2$s', 'hri-reviews-importer'), $data['error_message'], $status);
+            } else {
+                /* translators: %s: status */
+                $msg = sprintf(__('API error, Status: %s', 'hri-reviews-importer'), $status);
+            }
             throw new \RuntimeException($msg);
         }
 
@@ -1384,7 +1398,8 @@ class HRI_Review_Importer
             'timeout' => 20,
         ));
         if (is_wp_error($res)) {
-            throw new \RuntimeException('HTTP error: ' . $res->get_error_message());
+            /* translators: %s: error message */
+            throw new \RuntimeException(sprintf(__('HTTP error: %s', 'hri-reviews-importer'), $res->get_error_message()));
         }
 
         $code = wp_remote_retrieve_response_code($res);
@@ -1395,7 +1410,12 @@ class HRI_Review_Importer
             if (is_array($data)) {
                 $detail = trim((is_string($data['error'] ?? null) ? $data['error'] : '') . ' ' . (is_string($data['error_description'] ?? null) ? $data['error_description'] : ''));
             }
-            throw new \RuntimeException('OAuth token error (' . $code . ')' . ($detail !== '' ? ': ' . $detail : ''));
+            if ($detail !== '') {
+                /* translators: 1: HTTP response code, 2: error details */
+                throw new \RuntimeException(sprintf(__('OAuth token error (%1$s): %2$s', 'hri-reviews-importer'), $code, $detail));
+            }
+            /* translators: %s: HTTP response code */
+            throw new \RuntimeException(sprintf(__('OAuth token error (%s)', 'hri-reviews-importer'), $code));
         }
 
         return $data;
@@ -1415,7 +1435,7 @@ class HRI_Review_Importer
     {
         $token = get_option(self::OPTION_GBP_TOKEN, array());
         if (!is_array($token) || empty($token['refresh_token'])) {
-            throw new \RuntimeException('Not connected. Connect a Google account on the settings page.');
+            throw new \RuntimeException(__('Not connected. Connect a Google account on the settings page.', 'hri-reviews-importer'));
         }
         if (!empty($token['access_token']) && (int) ($token['expires_at'] ?? 0) - 60 > time()) {
             return $token['access_token'];
@@ -1484,7 +1504,7 @@ class HRI_Review_Importer
     {
         $location = trim((string) get_option(self::OPTION_GBP_LOCATION, ''), " \t\n\r\0\x0B/");
         if (!preg_match('#^accounts/[^/]+/locations/[^/]+$#', $location)) {
-            throw new \RuntimeException('Missing or invalid location. Expected format: accounts/{accountId}/locations/{locationId}');
+            throw new \RuntimeException(__('Missing or invalid location. Expected format: accounts/{accountId}/locations/{locationId}', 'hri-reviews-importer'));
         }
 
         // The API has no language parameter, the language is requested with the Accept-Language
@@ -1560,7 +1580,7 @@ class HRI_Review_Importer
 
         $client_id = trim((string) get_option(self::OPTION_GBP_CLIENT_ID, ''));
         if ($client_id === '') {
-            $this->log_error('Missing OAuth client ID.', array('where' => 'handle_gbp_connect'));
+            $this->log_error(__('Missing OAuth client ID.', 'hri-reviews-importer'), array('where' => 'handle_gbp_connect'));
             $this->gbp_redirect_back('error');
         }
 
@@ -1585,14 +1605,15 @@ class HRI_Review_Importer
         try {
             $state = isset($_GET['state']) ? sanitize_text_field(wp_unslash($_GET['state'])) : '';
             if (! wp_verify_nonce($state, 'hri_gbp_oauth')) {
-                throw new \RuntimeException('Invalid OAuth state. Start the connection again.');
+                throw new \RuntimeException(__('Invalid OAuth state. Start the connection again.', 'hri-reviews-importer'));
             }
             if (! empty($_GET['error'])) {
-                throw new \RuntimeException('Google OAuth error: ' . sanitize_text_field(wp_unslash($_GET['error'])));
+                /* translators: %s: error code returned by Google */
+                throw new \RuntimeException(sprintf(__('Google OAuth error: %s', 'hri-reviews-importer'), sanitize_text_field(wp_unslash($_GET['error']))));
             }
             $code = isset($_GET['code']) ? sanitize_text_field(wp_unslash($_GET['code'])) : '';
             if ($code === '') {
-                throw new \RuntimeException('Missing authorization code.');
+                throw new \RuntimeException(__('Missing authorization code.', 'hri-reviews-importer'));
             }
 
             $data = $this->gbp_token_request(array(
@@ -1601,7 +1622,7 @@ class HRI_Review_Importer
                 'redirect_uri' => $this->gbp_redirect_uri(),
             ));
             if (empty($data['refresh_token'])) {
-                throw new \RuntimeException('Google did not return a refresh token.');
+                throw new \RuntimeException(__('Google did not return a refresh token.', 'hri-reviews-importer'));
             }
             $this->gbp_store_token($data);
             $this->clear_last_error();
@@ -1661,7 +1682,7 @@ class HRI_Review_Importer
                 }
             }
             if (empty($locations)) {
-                throw new \RuntimeException('No Business Profile locations found for this Google account.');
+                throw new \RuntimeException(__('No Business Profile locations found for this Google account.', 'hri-reviews-importer'));
             }
 
             update_option(self::OPTION_GBP_LOCATIONS, $locations, false);
@@ -1880,19 +1901,22 @@ class HRI_Review_Importer
         while ($url) {
             $res = wp_remote_get($url, array('timeout' => 20));
             if (is_wp_error($res)) {
-                throw new \RuntimeException('HTTP error: ' . $res->get_error_message());
+                /* translators: %s: error message */
+                throw new \RuntimeException(sprintf(__('HTTP error: %s', 'hri-reviews-importer'), $res->get_error_message()));
             }
 
             $code = wp_remote_retrieve_response_code($res);
             $body = json_decode(wp_remote_retrieve_body($res), true);
 
             if ($code !== 200 || !is_array($body)) {
-                throw new \RuntimeException('Bad response (' . $code . '): ' . substr((string) wp_remote_retrieve_body($res), 0, 500));
+                /* translators: 1: HTTP response code, 2: beginning of the response body */
+                throw new \RuntimeException(sprintf(__('Bad response (%1$s): %2$s', 'hri-reviews-importer'), $code, substr((string) wp_remote_retrieve_body($res), 0, 500)));
             }
 
             // Facebook hibaüzenet?
             if (!empty($body['error']['message'])) {
-                throw new \RuntimeException('Graph API error: ' . $body['error']['message']);
+                /* translators: %s: error message */
+                throw new \RuntimeException(sprintf(__('Graph API error: %s', 'hri-reviews-importer'), $body['error']['message']));
             }
 
             foreach ((array) ($body['data'] ?? []) as $item) {
@@ -1923,7 +1947,7 @@ class HRI_Review_Importer
                 $post_date     = get_date_from_gmt($post_date_gmt, 'Y-m-d H:i:s');
 
                 // Reviewer adatok
-                $reviewer_name = $item['reviewer']['name'] ?? 'Facebook User';
+                $reviewer_name = $item['reviewer']['name'] ?? __('Facebook User', 'hri-reviews-importer');
                 $profile_photo_url = $item['reviewer']['picture']['data']['url'] ?? '';
 
                 // Meglévő bejegyzés?
@@ -2014,7 +2038,8 @@ class HRI_Review_Importer
 
             $res = wp_remote_get($url, array('timeout' => 15));
             if (is_wp_error($res)) {
-                throw new \RuntimeException('HTTP error: ' . $res->get_error_message());
+                /* translators: %s: error message */
+                throw new \RuntimeException(sprintf(__('HTTP error: %s', 'hri-reviews-importer'), $res->get_error_message()));
             }
 
             $code    = wp_remote_retrieve_response_code($res);
@@ -2022,13 +2047,15 @@ class HRI_Review_Importer
             $body    = json_decode($bodyraw, true);
 
             if ($code !== 200) {
-                throw new \RuntimeException('Bad response code: ' . $code . ' – ' . substr($bodyraw, 0, 300));
+                /* translators: 1: HTTP response code, 2: beginning of the response body */
+                throw new \RuntimeException(sprintf(__('Bad response code: %1$s – %2$s', 'hri-reviews-importer'), $code, substr($bodyraw, 0, 300)));
             }
             if (! is_array($body)) {
-                throw new \RuntimeException('Invalid JSON response.');
+                throw new \RuntimeException(__('Invalid JSON response.', 'hri-reviews-importer'));
             }
             if (! empty($body['error']['message'])) {
-                throw new \RuntimeException('Graph API error: ' . $body['error']['message']);
+                /* translators: %s: error message */
+                throw new \RuntimeException(sprintf(__('Graph API error: %s', 'hri-reviews-importer'), $body['error']['message']));
             }
 
             // siker
