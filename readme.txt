@@ -4,7 +4,7 @@ Tags: reviews, google, facebook, importer, headless, custom post type, cron
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.2.0
+Stable tag: 1.3.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -56,12 +56,21 @@ Aggregated Google rating fields:
 
 == Installation ==
 
-1. Copy the plugin to:  
-   `wp-content/plugins/hri-reviews-importer/`
-2. The main file should be:  
-   `hri-reviews-importer.php`
+1. Download `headless-reviews-importer-x.y.z.zip` from the latest release:
+   https://github.com/MDylan/headless-reviews-importer/releases
+2. Upload it under **Plugins → Add New → Upload Plugin** (or unpack it to `wp-content/plugins/headless-reviews-importer/`).
 3. Activate the plugin on the **Plugins** page.
 4. Open **Settings → Reviews Import Settings**, fill in the API keys, set the import frequency, minimum rating, and languages.
+
+== Updates ==
+
+From version 1.3.0 the plugin updates itself from the releases of its public GitHub repository; no token or account is needed.
+
+- A new release shows up on the **Plugins** and **Dashboard → Updates** screens like any other plugin update, and WordPress's own **Enable auto-updates** switch works for it. WordPress looks for updates about twice a day; **Check again** on the Updates screen looks immediately.
+- Only stable releases are offered by default. Tick **Pre-release updates** on the settings page to get pre-releases too (e.g. on a test site).
+- Sites running 1.2.0 or older have to be updated by hand once, by uploading the zip.
+
+Publishing a release: set the new version in the plugin header (`Version`) and in this file (`Stable tag`), then publish a GitHub release tagged `vX.Y.Z`. A workflow attaches the installable zip to the release; it fails if the tag and the plugin version differ.
 
 == Usage ==
 

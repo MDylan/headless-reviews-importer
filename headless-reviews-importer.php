@@ -3,9 +3,10 @@
 /**
  * Plugin Name: Headless Google/Facebook Reviews Importer
  * Description: Settings page (Facebook/Google keys, import frequency, imported languages, minimum rating), "Import now" button, last run display + "reviews" custom post type with meta fields and list columns.
- * Version:     1.2.0
+ * Version:     1.3.0
  * Author:      Molnár Dávid
  * License:     GPLv2 or later
+ * Update URI:  https://github.com/MDylan/headless-reviews-importer
  * Text Domain: hri-reviews-importer
  * Domain Path: /languages
  */
@@ -37,6 +38,10 @@ class HRI_Review_Importer
     const OPTION_GBP_TOKEN = 'hri_gbp_token';
     const OPTION_GBP_LOCATIONS = 'hri_gbp_locations';
     const OPTION_GBP_SYNCED = 'hri_gbp_synced';
+    const OPTION_UPDATE_PRERELEASES = 'hri_update_prereleases';
+
+    // Updates come from the releases of this public GitHub repository (see the "Update URI" header)
+    const GITHUB_REPO = 'MDylan/headless-reviews-importer';
 
     // Business Profile API: max. review pages (50 reviews each) fetched per run
     const GBP_MAX_PAGES = 20;
@@ -93,6 +98,11 @@ class HRI_Review_Importer
         add_action('admin_post_hri_gbp_oauth_callback', array($this, 'handle_gbp_oauth_callback'));
         add_action('admin_post_hri_gbp_disconnect', array($this, 'handle_gbp_disconnect'));
         add_action('admin_post_hri_gbp_fetch_locations', array($this, 'handle_gbp_fetch_locations'));
+
+        // Updates from GitHub releases (hook name = host of the "Update URI" header)
+        add_filter('update_plugins_github.com', array($this, 'check_for_update'), 10, 3);
+        add_filter('plugins_api', array($this, 'plugin_info'), 20, 3);
+        add_filter('upgrader_source_selection', array($this, 'fix_update_folder'), 10, 4);
     }
 
     /**
@@ -148,6 +158,7 @@ class HRI_Review_Importer
         $this->hri_set_option_autoload(self::OPTION_GBP_CLIENT_ID,   '', false);
         $this->hri_set_option_autoload(self::OPTION_GBP_CLIENT_SECRET,   '', false);
         $this->hri_set_option_autoload(self::OPTION_GBP_LOCATION,   '', false);
+        $this->hri_set_option_autoload(self::OPTION_UPDATE_PRERELEASES,   0, false);
         $this->hri_set_option_autoload(self::OPTION_LAST_ERROR,   array(), false);
     }
 
@@ -247,6 +258,11 @@ class HRI_Review_Importer
             'default'           => 4,
         ));
         register_setting('hri_settings_group', self::OPTION_SKIP_EMPTY_REVIEWS, array(
+            'type'              => 'boolean',
+            'sanitize_callback' => array($this, 'sanitize_checkbox'),
+            'default'           => false,
+        ));
+        register_setting('hri_settings_group', self::OPTION_UPDATE_PRERELEASES, array(
             'type'              => 'boolean',
             'sanitize_callback' => array($this, 'sanitize_checkbox'),
             'default'           => false,
@@ -363,6 +379,18 @@ class HRI_Review_Importer
             array(
                 'option' => self::OPTION_SKIP_EMPTY_REVIEWS,
                 'label'  => esc_html__('If checked, reviews without a text comment will be skipped.', 'hri-reviews-importer'),
+            )
+        );
+
+        add_settings_field(
+            self::OPTION_UPDATE_PRERELEASES,
+            esc_html__('Pre-release updates', 'hri-reviews-importer'),
+            array($this, 'render_checkbox_field'),
+            'hri-review-import-settings',
+            'hri_settings_section',
+            array(
+                'option' => self::OPTION_UPDATE_PRERELEASES,
+                'label'  => esc_html__('If checked, pre-releases published on GitHub are offered as plugin updates too.', 'hri-reviews-importer'),
             )
         );
 
@@ -1648,6 +1676,156 @@ class HRI_Review_Importer
         }
 
         $this->gbp_redirect_back($status);
+    }
+
+    /** Plugin folder name; WordPress identifies the plugin by this on the update screens */
+    private function update_slug()
+    {
+        $slug = dirname(plugin_basename(__FILE__));
+        return ('.' === $slug) ? basename(__FILE__, '.php') : $slug;
+    }
+
+    /**
+     * Newest release of the GitHub repository (unauthenticated API call, cached).
+     *
+     * @return array|null version, package, url, body, published – or null if there is none or GitHub cannot be reached.
+     */
+    private function get_latest_release()
+    {
+        $prereleases = (bool) get_option(self::OPTION_UPDATE_PRERELEASES, false);
+        $cache_key   = 'hri_update_release_' . ($prereleases ? 'pre' : 'stable');
+
+        // "Check again" on the Updates screen has to see a release published a minute ago
+        $cached = empty($_GET['force-check']) ? get_transient($cache_key) : false;
+        if (is_array($cached)) {
+            return ! empty($cached) ? $cached : null;
+        }
+
+        $res = wp_remote_get('https://api.github.com/repos/' . self::GITHUB_REPO . '/releases?per_page=10', array(
+            'headers' => array('Accept' => 'application/vnd.github+json'),
+            'timeout' => 15,
+        ));
+        $data = (is_wp_error($res) || wp_remote_retrieve_response_code($res) !== 200)
+            ? null
+            : json_decode(wp_remote_retrieve_body($res), true);
+
+        if (! is_array($data)) {
+            // Unreachable or rate limited (60 requests/hour per IP): do not retry on every admin page load
+            set_transient($cache_key, array(), 30 * MINUTE_IN_SECONDS);
+            return null;
+        }
+
+        $release = null;
+        foreach ($data as $item) {
+            if (! is_array($item) || empty($item['tag_name']) || ! empty($item['draft'])) {
+                continue;
+            }
+            if (! $prereleases && ! empty($item['prerelease'])) {
+                continue;
+            }
+
+            $version = ltrim((string) $item['tag_name'], 'vV');
+            if (! preg_match('/^\d/', $version) || ($release && version_compare($version, $release['version'], '<='))) {
+                continue;
+            }
+
+            // The zip attached by the release workflow has the right folder name; the tag archive does not (see fix_update_folder)
+            $package = 'https://github.com/' . self::GITHUB_REPO . '/archive/refs/tags/' . rawurlencode((string) $item['tag_name']) . '.zip';
+            foreach ((array) ($item['assets'] ?? array()) as $asset) {
+                if (! empty($asset['browser_download_url']) && substr((string) ($asset['name'] ?? ''), -4) === '.zip') {
+                    $package = (string) $asset['browser_download_url'];
+                    break;
+                }
+            }
+
+            $release = array(
+                'version'   => $version,
+                'package'   => $package,
+                'url'       => (string) ($item['html_url'] ?? 'https://github.com/' . self::GITHUB_REPO . '/releases'),
+                'body'      => (string) ($item['body'] ?? ''),
+                'published' => (string) ($item['published_at'] ?? ''),
+            );
+        }
+
+        set_transient($cache_key, $release ? $release : array(), HOUR_IN_SECONDS);
+
+        return $release;
+    }
+
+    /** Update check: WordPress compares the returned version with the installed one */
+    public function check_for_update($update, $plugin_data, $plugin_file)
+    {
+        // The hook is shared by every plugin whose Update URI points to github.com
+        if ($plugin_file !== plugin_basename(__FILE__)) {
+            return $update;
+        }
+
+        $release = $this->get_latest_release();
+        if (! $release) {
+            return $update;
+        }
+
+        return array(
+            'slug'    => $this->update_slug(),
+            'version' => $release['version'],
+            'url'     => 'https://github.com/' . self::GITHUB_REPO,
+            'package' => $release['package'],
+        );
+    }
+
+    /** "View details" popup on the Plugins and Updates screens */
+    public function plugin_info($result, $action, $args)
+    {
+        if ('plugin_information' !== $action || empty($args->slug) || $args->slug !== $this->update_slug()) {
+            return $result;
+        }
+
+        $release = $this->get_latest_release();
+        if (! $release) {
+            return $result;
+        }
+
+        $header    = get_file_data(__FILE__, array('name' => 'Plugin Name', 'author' => 'Author'));
+        $changelog = trim($release['body']) !== ''
+            ? wpautop(esc_html($release['body']))
+            : sprintf('<p><a href="%1$s" target="_blank">%1$s</a></p>', esc_url($release['url']));
+
+        return (object) array(
+            'name'          => $header['name'],
+            'slug'          => $this->update_slug(),
+            'version'       => $release['version'],
+            'author'        => $header['author'],
+            'homepage'      => 'https://github.com/' . self::GITHUB_REPO,
+            'download_link' => $release['package'],
+            'last_updated'  => $release['published'],
+            'external'      => true, // not hosted on wordpress.org
+            'sections'      => array('changelog' => $changelog),
+        );
+    }
+
+    /**
+     * A GitHub tag archive unpacks to "{repo}-{version}"; WordPress would install it under that name
+     * and the plugin would end up deactivated. Rename it to the installed folder name.
+     */
+    public function fix_update_folder($source, $remote_source, $upgrader, $hook_extra = array())
+    {
+        global $wp_filesystem;
+
+        if (is_wp_error($source) || empty($hook_extra['plugin']) || $hook_extra['plugin'] !== plugin_basename(__FILE__)) {
+            return $source;
+        }
+
+        $folder = dirname(plugin_basename(__FILE__));
+        if ('.' === $folder || basename(untrailingslashit($source)) === $folder || untrailingslashit($source) === untrailingslashit($remote_source)) {
+            return $source;
+        }
+
+        $target = trailingslashit($remote_source) . $folder;
+        if (! $wp_filesystem || ! $wp_filesystem->move(untrailingslashit($source), $target, true)) {
+            return new \WP_Error('hri_update_folder', __('Could not rename the folder of the downloaded update.', 'hri-reviews-importer'));
+        }
+
+        return trailingslashit($target);
     }
 
     private function log_error($message, $context = array())

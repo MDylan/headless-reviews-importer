@@ -1,0 +1,40 @@
+name: Release zip
+
+# Attaches the installable plugin zip to every published release (pre-releases included).
+# The plugin's updater downloads this asset.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      # A tag above the plugin's own version would make WordPress offer the same update forever
+      - name: Check that the tag matches the plugin version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="${TAG#v}"
+          header="$(sed -n 's/^ \* Version:[[:space:]]*//p' headless-reviews-importer.php | tr -d '\r' | head -n 1)"
+          if [ "$version" != "$header" ]; then
+            echo "::error::Tag $TAG does not match the plugin header (Version: $header)"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Build zip
+        run: git archive --format=zip --prefix=headless-reviews-importer/ -o "headless-reviews-importer-$VERSION.zip" HEAD
+
+      - name: Attach zip to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" "headless-reviews-importer-$VERSION.zip" --clobber
