@@ -55,7 +55,8 @@ Bricks dynamic data tags for the aggregated Google rating (group **Reviews Impor
 
 The tags accept `@fallback` (e.g. `{hri_google_rating @fallback:'–'}`), shown while the tag is empty. Filters such as `:plain` are accepted and change nothing.
 
-`AGENTS.md` describes every field and tag for building the frontend in Bricks.
+`AGENTS.md` in the GitHub repository describes every field and tag for building the frontend in Bricks:
+https://github.com/MDylan/headless-reviews-importer/blob/main/AGENTS.md
 
 == Features ==
 

@@ -1,3 +1,5 @@
 # Not part of the installable plugin: left out of the release zip and of GitHub's tag archives
 /.github export-ignore
 /.gitattributes export-ignore
+/AGENTS.md export-ignore
+/README.md export-ignore
