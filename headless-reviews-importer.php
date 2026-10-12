@@ -65,6 +65,7 @@ class HRI_Review_Importer
         add_action('admin_init', array($this, 'register_settings'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_assets'));
         add_filter('plugin_action_links_' . plugin_basename(__FILE__), array($this, 'add_settings_link'));
+        add_filter('plugin_row_meta', array($this, 'add_github_link'), 10, 2);
 
         // Import now (admin-post)
         add_action('admin_post_hri_import_now', array($this, 'handle_import_now'));
@@ -207,6 +208,18 @@ class HRI_Review_Importer
             esc_url(admin_url('options-general.php?page=hri-review-import-settings')),
             esc_html__('Settings', 'hri-reviews-importer')
         ));
+        return $links;
+    }
+
+    /** "GitHub" link in the plugin's row on the Plugins screen: source, issues and the release notes */
+    public function add_github_link($links, $file)
+    {
+        if ($file === plugin_basename(__FILE__)) {
+            $links[] = sprintf(
+                '<a href="%s" target="_blank" rel="noopener">GitHub</a>',
+                esc_url('https://github.com/' . self::GITHUB_REPO)
+            );
+        }
         return $links;
     }
 

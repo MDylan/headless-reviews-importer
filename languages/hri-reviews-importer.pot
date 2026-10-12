@@ -9,7 +9,7 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"POT-Creation-Date: 2026-10-12T09:57:30+00:00\n"
+"POT-Creation-Date: 2026-10-12T10:09:07+00:00\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "X-Generator: WP-CLI 2.12.0\n"
 "X-Domain: hri-reviews-importer\n"
@@ -29,596 +29,596 @@ msgstr ""
 msgid "Molnár Dávid"
 msgstr ""
 
-#: headless-reviews-importer.php:177
 #: headless-reviews-importer.php:178
-#: headless-reviews-importer.php:561
+#: headless-reviews-importer.php:179
+#: headless-reviews-importer.php:574
 msgid "Reviews Import Settings"
 msgstr ""
 
-#: headless-reviews-importer.php:197
+#: headless-reviews-importer.php:198
 msgid "Copied"
 msgstr ""
 
-#: headless-reviews-importer.php:198
+#: headless-reviews-importer.php:199
 msgid "Save your changes first."
 msgstr ""
 
-#: headless-reviews-importer.php:208
+#: headless-reviews-importer.php:209
 msgid "Settings"
 msgstr ""
 
-#: headless-reviews-importer.php:285
-#: headless-reviews-importer.php:380
+#: headless-reviews-importer.php:298
+#: headless-reviews-importer.php:393
 msgid "Source API"
 msgstr ""
 
-#: headless-reviews-importer.php:286
+#: headless-reviews-importer.php:299
 msgid "Google Places API key"
 msgstr ""
 
-#: headless-reviews-importer.php:287
+#: headless-reviews-importer.php:300
 msgid "Enable the selected Places API in your Google Cloud project, then create a key for it."
 msgstr ""
 
-#: headless-reviews-importer.php:289
+#: headless-reviews-importer.php:302
 msgid "Get an API key (Places API)."
 msgstr ""
 
-#: headless-reviews-importer.php:291
+#: headless-reviews-importer.php:304
 msgid "Google Place ID"
 msgstr ""
 
-#: headless-reviews-importer.php:292
+#: headless-reviews-importer.php:305
 msgid "The ID of the business on Google Maps."
 msgstr ""
 
-#: headless-reviews-importer.php:294
+#: headless-reviews-importer.php:307
 msgid "Place IDs documentation"
 msgstr ""
 
-#: headless-reviews-importer.php:296
+#: headless-reviews-importer.php:309
 msgid "Import order"
 msgstr ""
 
-#: headless-reviews-importer.php:298
+#: headless-reviews-importer.php:311
 msgid "Which reviews Google returns (at most 5): the newest or the most relevant ones."
 msgstr ""
 
-#: headless-reviews-importer.php:301
+#: headless-reviews-importer.php:314
 msgid "Setup guide"
 msgstr ""
 
-#: headless-reviews-importer.php:302
+#: headless-reviews-importer.php:315
 msgid "Authorized redirect URI"
 msgstr ""
 
-#: headless-reviews-importer.php:303
+#: headless-reviews-importer.php:316
 msgid "Business Profile OAuth client ID"
 msgstr ""
 
-#: headless-reviews-importer.php:304
+#: headless-reviews-importer.php:317
 msgid "Business Profile OAuth client secret"
 msgstr ""
 
-#: headless-reviews-importer.php:305
+#: headless-reviews-importer.php:318
 msgid "Google account"
 msgstr ""
 
-#: headless-reviews-importer.php:306
+#: headless-reviews-importer.php:319
 msgid "Business Profile location"
 msgstr ""
 
-#: headless-reviews-importer.php:308
+#: headless-reviews-importer.php:321
 msgid "Facebook Page ID"
 msgstr ""
 
-#: headless-reviews-importer.php:309
+#: headless-reviews-importer.php:322
 msgid "Facebook Page Access Token"
 msgstr ""
 
-#: headless-reviews-importer.php:310
+#: headless-reviews-importer.php:323
 msgid "Connection test"
 msgstr ""
 
-#: headless-reviews-importer.php:312
+#: headless-reviews-importer.php:325
 msgid "Import frequency"
 msgstr ""
 
-#: headless-reviews-importer.php:313
+#: headless-reviews-importer.php:326
 msgid "Minimum imported rating"
 msgstr ""
 
-#: headless-reviews-importer.php:314
+#: headless-reviews-importer.php:327
 msgid "Imported languages (short codes)"
 msgstr ""
 
-#: headless-reviews-importer.php:315
+#: headless-reviews-importer.php:328
 msgid "Skip empty reviews"
 msgstr ""
 
-#: headless-reviews-importer.php:316
+#: headless-reviews-importer.php:329
 msgid "If checked, reviews without a text comment will be skipped."
 msgstr ""
 
-#: headless-reviews-importer.php:319
+#: headless-reviews-importer.php:332
 msgid "Pre-release updates"
 msgstr ""
 
-#: headless-reviews-importer.php:320
+#: headless-reviews-importer.php:333
 msgid "If checked, pre-releases published on GitHub are offered as plugin updates too."
 msgstr ""
 
-#: headless-reviews-importer.php:337
+#: headless-reviews-importer.php:350
 msgid "Newest"
 msgstr ""
 
-#: headless-reviews-importer.php:342
+#: headless-reviews-importer.php:355
 msgid "Most Relevant"
 msgstr ""
 
-#: headless-reviews-importer.php:362
+#: headless-reviews-importer.php:375
 msgid "Business Profile API (OAuth)"
 msgstr ""
 
-#: headless-reviews-importer.php:363
+#: headless-reviews-importer.php:376
 msgid "All reviews of a profile you manage, newest first. Needs an OAuth connection, and Google has to approve Business Profile API access for the Cloud project."
 msgstr ""
 
-#: headless-reviews-importer.php:366
+#: headless-reviews-importer.php:379
 msgid "Places API (New)"
 msgstr ""
 
-#: headless-reviews-importer.php:367
+#: headless-reviews-importer.php:380
 msgid "Needs an API key and a Place ID. At most 5 reviews, always the most relevant ones (there is no \"newest\" order)."
 msgstr ""
 
-#: headless-reviews-importer.php:370
+#: headless-reviews-importer.php:383
 msgid "Places API (Legacy)"
 msgstr ""
 
-#: headless-reviews-importer.php:371
+#: headless-reviews-importer.php:384
 msgid "Needs an API key and a Place ID. At most 5 reviews, the newest or the most relevant ones. Can no longer be enabled in new Google Cloud projects."
 msgstr ""
 
-#: headless-reviews-importer.php:404
+#: headless-reviews-importer.php:417
 msgid "How to set up the Business Profile API"
 msgstr ""
 
-#: headless-reviews-importer.php:406
+#: headless-reviews-importer.php:419
 msgid "In your Google Cloud project (with approved Business Profile API access) enable: Google My Business API, My Business Account Management API, My Business Business Information API."
 msgstr ""
 
-#: headless-reviews-importer.php:407
+#: headless-reviews-importer.php:420
 msgid "Create an OAuth client (type: Web application) with the authorized redirect URI below."
 msgstr ""
 
-#: headless-reviews-importer.php:408
+#: headless-reviews-importer.php:421
 msgid "Save the client ID and client secret, then connect with a Google account that manages the Business Profile."
 msgstr ""
 
-#: headless-reviews-importer.php:409
-#: headless-reviews-importer.php:602
+#: headless-reviews-importer.php:422
+#: headless-reviews-importer.php:615
 msgid "Choose the Business Profile location and save."
 msgstr ""
 
-#: headless-reviews-importer.php:422
+#: headless-reviews-importer.php:435
 msgid "Copy"
 msgstr ""
 
-#: headless-reviews-importer.php:435
+#: headless-reviews-importer.php:448
 msgid "Connected"
 msgstr ""
 
-#: headless-reviews-importer.php:435
+#: headless-reviews-importer.php:448
 msgid "Not connected"
 msgstr ""
 
-#: headless-reviews-importer.php:438
+#: headless-reviews-importer.php:451
 msgid "Reconnect Google account"
 msgstr ""
 
-#: headless-reviews-importer.php:438
+#: headless-reviews-importer.php:451
 msgid "Connect Google account"
 msgstr ""
 
-#: headless-reviews-importer.php:441
+#: headless-reviews-importer.php:454
 msgid "Disconnect"
 msgstr ""
 
-#: headless-reviews-importer.php:445
+#: headless-reviews-importer.php:458
 msgid "Save the OAuth client ID and client secret first."
 msgstr ""
 
-#: headless-reviews-importer.php:457
+#: headless-reviews-importer.php:470
 msgid "— Select —"
 msgstr ""
 
-#: headless-reviews-importer.php:482
+#: headless-reviews-importer.php:495
 msgid "Refresh list"
 msgstr ""
 
-#: headless-reviews-importer.php:482
+#: headless-reviews-importer.php:495
 msgid "Fetch locations"
 msgstr ""
 
-#: headless-reviews-importer.php:485
+#: headless-reviews-importer.php:498
 msgid "Format: accounts/{accountId}/locations/{locationId}. After connecting, the locations of the Google account can be chosen from a list."
 msgstr ""
 
-#: headless-reviews-importer.php:491
+#: headless-reviews-importer.php:504
 msgid "Test Facebook connection"
 msgstr ""
 
-#: headless-reviews-importer.php:492
+#: headless-reviews-importer.php:505
 msgid "Tests the saved Page ID and access token."
 msgstr ""
 
-#: headless-reviews-importer.php:543
-#: headless-reviews-importer.php:1072
+#: headless-reviews-importer.php:556
+#: headless-reviews-importer.php:1085
 msgid "Google"
 msgstr ""
 
-#: headless-reviews-importer.php:544
-#: headless-reviews-importer.php:1073
+#: headless-reviews-importer.php:557
+#: headless-reviews-importer.php:1086
 msgid "Facebook"
 msgstr ""
 
-#: headless-reviews-importer.php:545
+#: headless-reviews-importer.php:558
 msgid "Import"
 msgstr ""
 
-#: headless-reviews-importer.php:546
+#: headless-reviews-importer.php:559
 msgid "Advanced"
 msgstr ""
 
-#: headless-reviews-importer.php:582
+#: headless-reviews-importer.php:595
 msgid "The Facebook import has not been tested yet."
 msgstr ""
 
-#: headless-reviews-importer.php:590
+#: headless-reviews-importer.php:603
 msgid "Save"
 msgstr ""
 
-#: headless-reviews-importer.php:608
+#: headless-reviews-importer.php:621
 msgid "Import executed."
 msgstr ""
 
-#: headless-reviews-importer.php:609
+#: headless-reviews-importer.php:622
 msgid "Import failed. See the last error below."
 msgstr ""
 
-#: headless-reviews-importer.php:612
+#: headless-reviews-importer.php:625
 msgid "Facebook connection test succeeded."
 msgstr ""
 
-#: headless-reviews-importer.php:613
+#: headless-reviews-importer.php:626
 msgid "Facebook connection test failed. See the \"Last error\" below."
 msgstr ""
 
-#: headless-reviews-importer.php:616
+#: headless-reviews-importer.php:629
 msgid "Connected to Google Business Profile."
 msgstr ""
 
-#: headless-reviews-importer.php:617
+#: headless-reviews-importer.php:630
 msgid "Disconnected from Google Business Profile."
 msgstr ""
 
-#: headless-reviews-importer.php:618
+#: headless-reviews-importer.php:631
 msgid "Locations fetched."
 msgstr ""
 
-#: headless-reviews-importer.php:619
+#: headless-reviews-importer.php:632
 msgid "Google Business Profile action failed. See the \"Last error\" below."
 msgstr ""
 
-#: headless-reviews-importer.php:632
+#: headless-reviews-importer.php:645
 msgid "Last error"
 msgstr ""
 
-#: headless-reviews-importer.php:636
+#: headless-reviews-importer.php:649
 msgid "When"
 msgstr ""
 
-#: headless-reviews-importer.php:659
+#: headless-reviews-importer.php:672
 msgid "Last run"
 msgstr ""
 
-#: headless-reviews-importer.php:660
+#: headless-reviews-importer.php:673
 msgid "not run yet"
 msgstr ""
 
-#: headless-reviews-importer.php:663
+#: headless-reviews-importer.php:676
 msgid "Next run"
 msgstr ""
 
-#: headless-reviews-importer.php:664
+#: headless-reviews-importer.php:677
 msgid "not scheduled"
 msgstr ""
 
-#: headless-reviews-importer.php:668
+#: headless-reviews-importer.php:681
 msgid "Google rating"
 msgstr ""
 
 #. translators: 1: average rating, 2: number of ratings
-#: headless-reviews-importer.php:671
+#: headless-reviews-importer.php:684
 #, php-format
 msgid "%1$s (%2$s ratings)"
 msgstr ""
 
-#: headless-reviews-importer.php:676
+#: headless-reviews-importer.php:689
 msgid "Import now"
 msgstr ""
 
-#: headless-reviews-importer.php:756
+#: headless-reviews-importer.php:769
 msgid "Saved"
 msgstr ""
 
-#: headless-reviews-importer.php:760
+#: headless-reviews-importer.php:773
 msgid "Change"
 msgstr ""
 
-#: headless-reviews-importer.php:761
+#: headless-reviews-importer.php:774
 msgid "Delete"
 msgstr ""
 
-#: headless-reviews-importer.php:765
+#: headless-reviews-importer.php:778
 msgid "Cancel"
 msgstr ""
 
-#: headless-reviews-importer.php:766
+#: headless-reviews-importer.php:779
 msgid "Leave empty to keep the saved value."
 msgstr ""
 
-#: headless-reviews-importer.php:769
+#: headless-reviews-importer.php:782
 msgid "Will be deleted when you save."
 msgstr ""
 
-#: headless-reviews-importer.php:770
+#: headless-reviews-importer.php:783
 msgid "Undo"
 msgstr ""
 
-#: headless-reviews-importer.php:774
+#: headless-reviews-importer.php:787
 msgid "Delete the saved value"
 msgstr ""
 
-#: headless-reviews-importer.php:799
+#: headless-reviews-importer.php:812
 msgid "Hourly"
 msgstr ""
 
-#: headless-reviews-importer.php:800
+#: headless-reviews-importer.php:813
 msgid "Twice daily"
 msgstr ""
 
-#: headless-reviews-importer.php:801
+#: headless-reviews-importer.php:814
 msgid "Daily"
 msgstr ""
 
-#: headless-reviews-importer.php:833
+#: headless-reviews-importer.php:846
 msgid "Only ratings greater than or equal to this value will be imported."
 msgstr ""
 
-#: headless-reviews-importer.php:845
+#: headless-reviews-importer.php:858
 msgid "One code per line (e.g., \"hu\", \"en\"). \"hu_HU\", \"en_US\" are also accepted and will be normalized to short codes on save. The default language of the site is always included."
 msgstr ""
 
-#: headless-reviews-importer.php:847
+#: headless-reviews-importer.php:860
 msgid "Google Maps – Language support"
 msgstr ""
 
-#: headless-reviews-importer.php:914
-#: headless-reviews-importer.php:1711
-#: headless-reviews-importer.php:1736
-#: headless-reviews-importer.php:1781
-#: headless-reviews-importer.php:1836
-#: headless-reviews-importer.php:2169
+#: headless-reviews-importer.php:927
+#: headless-reviews-importer.php:1724
+#: headless-reviews-importer.php:1749
+#: headless-reviews-importer.php:1794
+#: headless-reviews-importer.php:1849
+#: headless-reviews-importer.php:2182
 msgid "Insufficient permissions."
 msgstr ""
 
-#: headless-reviews-importer.php:981
-#: headless-reviews-importer.php:983
+#: headless-reviews-importer.php:994
+#: headless-reviews-importer.php:996
 msgid "Reviews"
 msgstr ""
 
-#: headless-reviews-importer.php:982
-#: headless-reviews-importer.php:984
+#: headless-reviews-importer.php:995
+#: headless-reviews-importer.php:997
 msgid "Review"
 msgstr ""
 
-#: headless-reviews-importer.php:985
+#: headless-reviews-importer.php:998
 msgid "Add New"
 msgstr ""
 
-#: headless-reviews-importer.php:986
+#: headless-reviews-importer.php:999
 msgid "Add New Review"
 msgstr ""
 
-#: headless-reviews-importer.php:987
+#: headless-reviews-importer.php:1000
 msgid "New Review"
 msgstr ""
 
-#: headless-reviews-importer.php:988
+#: headless-reviews-importer.php:1001
 msgid "Edit Review"
 msgstr ""
 
-#: headless-reviews-importer.php:989
+#: headless-reviews-importer.php:1002
 msgid "View Review"
 msgstr ""
 
-#: headless-reviews-importer.php:990
+#: headless-reviews-importer.php:1003
 msgid "All Reviews"
 msgstr ""
 
-#: headless-reviews-importer.php:991
+#: headless-reviews-importer.php:1004
 msgid "Search Reviews"
 msgstr ""
 
-#: headless-reviews-importer.php:992
+#: headless-reviews-importer.php:1005
 msgid "No reviews found"
 msgstr ""
 
-#: headless-reviews-importer.php:993
+#: headless-reviews-importer.php:1006
 msgid "No reviews found in Trash"
 msgstr ""
 
-#: headless-reviews-importer.php:1022
+#: headless-reviews-importer.php:1035
 msgid "Review details"
 msgstr ""
 
-#: headless-reviews-importer.php:1031
+#: headless-reviews-importer.php:1044
 msgid "Review text (by language)"
 msgstr ""
 
-#: headless-reviews-importer.php:1055
+#: headless-reviews-importer.php:1068
 msgid "Rating (1–5)"
 msgstr ""
 
-#: headless-reviews-importer.php:1061
+#: headless-reviews-importer.php:1074
 msgid "Review ID"
 msgstr ""
 
-#: headless-reviews-importer.php:1064
+#: headless-reviews-importer.php:1077
 msgid "Non-editable field."
 msgstr ""
 
-#: headless-reviews-importer.php:1068
+#: headless-reviews-importer.php:1081
 msgid "Review source"
 msgstr ""
 
-#: headless-reviews-importer.php:1078
+#: headless-reviews-importer.php:1091
 msgid "Profile photo URL"
 msgstr ""
 
-#: headless-reviews-importer.php:1081
+#: headless-reviews-importer.php:1094
 msgid "URL of the reviewer’s profile image."
 msgstr ""
 
-#: headless-reviews-importer.php:1092
+#: headless-reviews-importer.php:1105
 msgid "No languages configured."
 msgstr ""
 
-#: headless-reviews-importer.php:1096
+#: headless-reviews-importer.php:1109
 msgid "Fields below are generated from the configured languages (short codes)."
 msgstr ""
 
 #. translators: %s: language short code, e.g. "hu"
-#: headless-reviews-importer.php:1103
+#: headless-reviews-importer.php:1116
 #, php-format
 msgid "review_%s"
 msgstr ""
 
-#: headless-reviews-importer.php:1157
+#: headless-reviews-importer.php:1170
 msgid "Source"
 msgstr ""
 
-#: headless-reviews-importer.php:1158
+#: headless-reviews-importer.php:1171
 msgid "Rating"
 msgstr ""
 
 #. translators: %s: error message
-#: headless-reviews-importer.php:1286
-#: headless-reviews-importer.php:1536
-#: headless-reviews-importer.php:2055
-#: headless-reviews-importer.php:2192
+#: headless-reviews-importer.php:1299
+#: headless-reviews-importer.php:1549
+#: headless-reviews-importer.php:2068
+#: headless-reviews-importer.php:2205
 #, php-format
 msgid "HTTP error: %s"
 msgstr ""
 
 #. translators: 1: error message, 2: status
-#: headless-reviews-importer.php:1295
-#: headless-reviews-importer.php:1344
+#: headless-reviews-importer.php:1308
+#: headless-reviews-importer.php:1357
 #, php-format
 msgid "API error: %1$s, Status: %2$s"
 msgstr ""
 
 #. translators: %s: HTTP response code
-#: headless-reviews-importer.php:1299
+#: headless-reviews-importer.php:1312
 #, php-format
 msgid "Bad response (%s)"
 msgstr ""
 
 #. translators: %s: status
-#: headless-reviews-importer.php:1347
+#: headless-reviews-importer.php:1360
 #, php-format
 msgid "API error, Status: %s"
 msgstr ""
 
 #. translators: 1: HTTP response code, 2: error details
-#: headless-reviews-importer.php:1549
+#: headless-reviews-importer.php:1562
 #, php-format
 msgid "OAuth token error (%1$s): %2$s"
 msgstr ""
 
 #. translators: %s: HTTP response code
-#: headless-reviews-importer.php:1552
+#: headless-reviews-importer.php:1565
 #, php-format
 msgid "OAuth token error (%s)"
 msgstr ""
 
-#: headless-reviews-importer.php:1572
+#: headless-reviews-importer.php:1585
 msgid "Not connected. Connect a Google account on the settings page."
 msgstr ""
 
-#: headless-reviews-importer.php:1641
+#: headless-reviews-importer.php:1654
 msgid "Missing or invalid location. Expected format: accounts/{accountId}/locations/{locationId}"
 msgstr ""
 
-#: headless-reviews-importer.php:1717
+#: headless-reviews-importer.php:1730
 msgid "Missing OAuth client ID."
 msgstr ""
 
-#: headless-reviews-importer.php:1742
+#: headless-reviews-importer.php:1755
 msgid "Invalid OAuth state. Start the connection again."
 msgstr ""
 
 #. translators: %s: error code returned by Google
-#: headless-reviews-importer.php:1746
+#: headless-reviews-importer.php:1759
 #, php-format
 msgid "Google OAuth error: %s"
 msgstr ""
 
-#: headless-reviews-importer.php:1750
+#: headless-reviews-importer.php:1763
 msgid "Missing authorization code."
 msgstr ""
 
-#: headless-reviews-importer.php:1759
+#: headless-reviews-importer.php:1772
 msgid "Google did not return a refresh token."
 msgstr ""
 
-#: headless-reviews-importer.php:1824
+#: headless-reviews-importer.php:1837
 msgid "No Business Profile locations found for this Google account."
 msgstr ""
 
-#: headless-reviews-importer.php:1996
+#: headless-reviews-importer.php:2009
 msgid "Could not rename the folder of the downloaded update."
 msgstr ""
 
 #. translators: 1: HTTP response code, 2: beginning of the response body
-#: headless-reviews-importer.php:2063
+#: headless-reviews-importer.php:2076
 #, php-format
 msgid "Bad response (%1$s): %2$s"
 msgstr ""
 
 #. translators: %s: error message
-#: headless-reviews-importer.php:2069
-#: headless-reviews-importer.php:2208
+#: headless-reviews-importer.php:2082
+#: headless-reviews-importer.php:2221
 #, php-format
 msgid "Graph API error: %s"
 msgstr ""
 
-#: headless-reviews-importer.php:2100
+#: headless-reviews-importer.php:2113
 msgid "Facebook User"
 msgstr ""
 
-#: headless-reviews-importer.php:2178
+#: headless-reviews-importer.php:2191
 msgid "Missing Facebook Page ID or Page Access Token."
 msgstr ""
 
 #. translators: 1: HTTP response code, 2: beginning of the response body
-#: headless-reviews-importer.php:2201
+#: headless-reviews-importer.php:2214
 #, php-format
 msgid "Bad response code: %1$s – %2$s"
 msgstr ""
 
-#: headless-reviews-importer.php:2204
+#: headless-reviews-importer.php:2217
 msgid "Invalid JSON response."
 msgstr ""
