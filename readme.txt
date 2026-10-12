@@ -4,7 +4,7 @@ Tags: reviews, google, facebook, importer, headless, custom post type, cron
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.3.1
+Stable tag: 1.4.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -33,17 +33,27 @@ Facebook import is not tested yet.
   - Meta fields:  
     - `profile_photo_url` - The reviewer's profile photo
     - `review_number` (1–5) – rating  
-    - `review_id` – non-editable identifier (set by the importer)  
-    - `review_source` – "Google" or "Facebook"  
+    - `review_id` – non-editable identifier (set by the importer)
+    - `review_source` – "Google" or "Facebook"
+    - `review_timestamp` – date of the review (`Y-m-d H:i:s`, set by the importer)
     - `review_{lang}` – dynamic fields based on configured languages (e.g., `review_hu`, `review_en`)
 - Admin list extra columns: **Source**, **Rating** (sortable).
 - Full **i18n** support: Text Domain: `hri-reviews-importer`, Domain Path: `/languages`. Default labels are in English.
 
-Aggregated Google rating fields:
+Aggregated rating options (`wp_options`):
 - hri_google_rating: Google rating value
-- hri_google_rating: Total number of Google reviews
-- hri_facebook_rating: Facebook rating value
-- hri_facebook_ratings_total: Total number of Facebook reviews
+- hri_user_ratings_total: Total number of Google reviews
+- hri_facebook_rating, hri_facebook_ratings_total: reserved, the importer does not fill them yet
+
+Until the first Google import the Google options hold the placeholders `5.0` and `1`.
+
+Bricks dynamic data tags for the aggregated Google rating (group **Reviews Importer**; empty until the first Google import):
+- `{hri_google_rating}` – rating with a decimal point, e.g. `4.8` (star elements, conditions)
+- `{hri_google_rating_formatted}` – rating in the number format of the site language
+- `{hri_google_ratings_total}` – number of reviews, digits only
+- `{hri_google_ratings_total_formatted}` – number of reviews in the number format of the site language
+
+`AGENTS.md` describes every field and tag for building the frontend in Bricks.
 
 == Features ==
 
@@ -81,7 +91,7 @@ Publishing a release: set the new version in the plugin header (`Version`) and i
 
 - **Immediate import:** click **Import now** on the settings page.  
 - **Scheduled import:** runs via cron at the selected frequency (hook: `hri_import_cron_event`).  
-- **Minimum rating:** reviews below the threshold may be saved as draft or skipped, depending on your importer logic.  
+- **Minimum rating:** reviews below the threshold are saved as drafts.  
 - **Languages:** enter one short code per line (`hu`, `en`, ...). Values are normalized on save.
 
 == Facebook usage - !!! NOT TESTED !!! ==

@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Headless Google/Facebook Reviews Importer
  * Description: Settings page (Facebook/Google keys, import frequency, imported languages, minimum rating), "Import now" button, last run display + "reviews" custom post type with meta fields and list columns.
- * Version:     1.3.1
+ * Version:     1.4.0
  * Author:      Molnár Dávid
  * License:     GPLv2 or later
  * Update URI:  https://github.com/MDylan/headless-reviews-importer
@@ -90,6 +90,12 @@ class HRI_Review_Importer
         add_action('manage_reviews_posts_custom_column', array($this, 'render_reviews_custom_column'), 10, 2);
         add_filter('manage_edit-reviews_sortable_columns', array($this, 'make_reviews_columns_sortable'));
         add_action('pre_get_posts', array($this, 'reviews_orderby_rating'));
+
+        // Bricks dynamic data tags (aggregated Google rating)
+        add_filter('bricks/dynamic_tags_list', array($this, 'bricks_add_tags'));
+        add_filter('bricks/dynamic_data/render_tag', array($this, 'bricks_render_tag'), 20, 3);
+        add_filter('bricks/dynamic_data/render_content', array($this, 'bricks_render_content'), 20, 3);
+        add_filter('bricks/frontend/render_data', array($this, 'bricks_render_content'), 20, 2);
 
         add_action('hri_run_import', array($this, 'hri_run_imports'));
 
@@ -663,11 +669,6 @@ class HRI_Review_Importer
         $format   = get_option('date_format') . ' ' . get_option('time_format');
         $last_run = get_option(self::OPTION_LAST_RUN, '');
         $next_run = wp_next_scheduled(self::CRON_HOOK);
-
-        // The rating options hold placeholders until the first Google import
-        $has_google = (get_option(self::OPTION_GOOGLE_API_VERSION, 'legacy') === 'gbp')
-            ? $this->gbp_is_connected()
-            : (trim((string) get_option(self::OPTION_GOOGLE_PLACES_API_KEY, '')) !== '' && trim((string) get_option(self::OPTION_GOOGLE_PLACE_ID, '')) !== '');
         ?>
         <div class="hri-status">
             <dl class="hri-status-items">
@@ -679,7 +680,7 @@ class HRI_Review_Importer
                     <dt><?php echo esc_html__('Next run', 'hri-reviews-importer'); ?></dt>
                     <dd><?php echo $next_run ? esc_html(wp_date($format, $next_run)) : esc_html__('not scheduled', 'hri-reviews-importer'); ?></dd>
                 </div>
-                <?php if ($last_run && $has_google) : ?>
+                <?php if ($this->has_google_rating()) : ?>
                     <div>
                         <dt><?php echo esc_html__('Google rating', 'hri-reviews-importer'); ?></dt>
                         <dd><?php
@@ -730,6 +731,16 @@ class HRI_Review_Importer
     {
         $token = get_option(self::OPTION_GBP_TOKEN, array());
         return is_array($token) && ! empty($token['refresh_token']);
+    }
+
+    /** The rating options hold placeholders until the first Google import */
+    private function has_google_rating()
+    {
+        if (! get_option(self::OPTION_LAST_RUN, '')) return false;
+
+        return (get_option(self::OPTION_GOOGLE_API_VERSION, 'legacy') === 'gbp')
+            ? $this->gbp_is_connected()
+            : (trim((string) get_option(self::OPTION_GOOGLE_PLACES_API_KEY, '')) !== '' && trim((string) get_option(self::OPTION_GOOGLE_PLACE_ID, '')) !== '');
     }
 
     /** Renderers */
@@ -1223,6 +1234,77 @@ class HRI_Review_Importer
             $query->set('meta_key', 'review_source');
             $query->set('orderby', 'meta_value');
         }
+    }
+
+    /** Bricks dynamic data tags: the aggregated Google rating */
+    private function bricks_tags()
+    {
+        return array(
+            'hri_google_rating'                  => __('Google rating', 'hri-reviews-importer'),
+            'hri_google_rating_formatted'        => __('Google rating (formatted)', 'hri-reviews-importer'),
+            'hri_google_ratings_total'           => __('Number of Google ratings', 'hri-reviews-importer'),
+            'hri_google_ratings_total_formatted' => __('Number of Google ratings (formatted)', 'hri-reviews-importer'),
+        );
+    }
+
+    /**
+     * Value of a tag. The plain tags keep the stored number (star elements, conditions),
+     * the "_formatted" ones follow the locale of the site (display text).
+     * Empty until the first Google import, so a placeholder is never shown to visitors.
+     */
+    private function bricks_tag_value($name)
+    {
+        if (! $this->has_google_rating()) return '';
+
+        switch ($name) {
+            case 'hri_google_rating':
+                return number_format((float) get_option(self::OPTION_GOOGLE_RATING, 0), 1, '.', '');
+            case 'hri_google_rating_formatted':
+                return number_format_i18n((float) get_option(self::OPTION_GOOGLE_RATING, 0), 1);
+            case 'hri_google_ratings_total':
+                return (string) (int) get_option(self::OPTION_GOOGLE_RATINGS_TOTAL, 0);
+            case 'hri_google_ratings_total_formatted':
+                return number_format_i18n((int) get_option(self::OPTION_GOOGLE_RATINGS_TOTAL, 0));
+        }
+
+        return '';
+    }
+
+    public function bricks_add_tags($tags)
+    {
+        foreach ($this->bricks_tags() as $name => $label) {
+            $tags[] = array(
+                'name'  => '{' . $name . '}',
+                'label' => $label,
+                'group' => 'Reviews Importer',
+            );
+        }
+        return $tags;
+    }
+
+    /** A single tag; the tags of other providers and non-string values pass through */
+    public function bricks_render_tag($tag, $post, $context = 'text')
+    {
+        if (! is_string($tag)) return $tag;
+
+        $name = trim($tag, '{}');
+        if (! array_key_exists($name, $this->bricks_tags())) return $tag;
+
+        // A number would be read as an attachment ID there
+        if ('image' === $context || 'media' === $context) return '';
+
+        return $this->bricks_tag_value($name);
+    }
+
+    /** Tags inside a text / HTML content */
+    public function bricks_render_content($content, $post = null, $context = 'text')
+    {
+        if (! is_string($content) || strpos($content, '{hri_google_') === false) return $content;
+
+        foreach (array_keys($this->bricks_tags()) as $name) {
+            $content = str_replace('{' . $name . '}', esc_html($this->bricks_tag_value($name)), $content);
+        }
+        return $content;
     }
 
     /** Language helpers */
