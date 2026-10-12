@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Headless Google/Facebook Reviews Importer
  * Description: Settings page (Facebook/Google keys, import frequency, imported languages, minimum rating), "Import now" button, last run display + "reviews" custom post type with meta fields and list columns.
- * Version:     1.3.0
+ * Version:     1.3.1
  * Author:      Molnár Dávid
  * License:     GPLv2 or later
  * Update URI:  https://github.com/MDylan/headless-reviews-importer
@@ -47,6 +47,9 @@ class HRI_Review_Importer
     const GBP_MAX_PAGES = 20;
     // Bump to make every site fetch all pages again (e.g. after changing how comments are parsed)
     const GBP_SYNC_VERSION = 1;
+
+    // Facebook Graph API: max. review pages (25 reviews each) fetched per run
+    const FB_MAX_PAGES = 100;
 
 
     // Cron hook
@@ -1021,6 +1024,20 @@ class HRI_Review_Importer
             'supports'           => array('title', 'editor'), // Title: reviewer name; Editor: review text
             'capability_type'    => 'post',
             'map_meta_cap'       => true,
+            // Editors and administrators only: with the capabilities of posts an Author could publish reviews
+            'capabilities'       => array_fill_keys(array(
+                'edit_posts',
+                'edit_others_posts',
+                'edit_private_posts',
+                'edit_published_posts',
+                'publish_posts',
+                'read_private_posts',
+                'delete_posts',
+                'delete_others_posts',
+                'delete_private_posts',
+                'delete_published_posts',
+                'create_posts',
+            ), 'edit_others_posts'),
             'has_archive'        => false,
         );
 
@@ -1244,6 +1261,21 @@ class HRI_Review_Importer
     }
 
     public function hri_run_imports()
+    {
+        // The cron and "Import now" must not run at the same time: both would create the same new reviews
+        require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+        if (! \WP_Upgrader::create_lock('hri_import', 15 * MINUTE_IN_SECONDS)) {
+            throw new \RuntimeException(__('Another import is still running. Try again in a few minutes.', 'hri-reviews-importer'));
+        }
+
+        try {
+            $this->run_imports();
+        } finally {
+            \WP_Upgrader::release_lock('hri_import');
+        }
+    }
+
+    private function run_imports()
     {
         $langs = $this->get_imported_languages_short_array();
         $errors = array();
@@ -1489,8 +1521,9 @@ class HRI_Review_Importer
 
                 $post_id = wp_insert_post([
                     'post_type'    => 'reviews',
-                    'post_title'   => $review['author_name'],
+                    'post_title'   => sanitize_text_field($review['author_name']),
                     'post_status'  => $post_status,
+                    'post_author'  => 0, // not the user who clicked "Import now"
                     'post_date' => $review['review_timestamp'],
                     'post_date_gmt' => $review['review_timestamp_gmt']
                 ]);
@@ -1507,7 +1540,8 @@ class HRI_Review_Importer
                 update_post_meta($post_id, 'review_timestamp', $review['review_timestamp']);
                 update_post_meta($post_id, 'review_source', 'Google');
                 update_post_meta($post_id, 'review_id', $review['review_id']);
-                update_post_meta($post_id, 'review_' . $language, wp_kses_post($review['text']));
+                // Plain text: a link or an image typed into a review must not become HTML
+                update_post_meta($post_id, 'review_' . $language, wp_kses($review['text'], array()));
                 update_post_meta($post_id, 'profile_photo_url', esc_url_raw($review['profile_photo_url']));
             }
         }
@@ -1909,15 +1943,19 @@ class HRI_Review_Importer
             }
 
             $version = ltrim((string) $item['tag_name'], 'vV');
-            if (! preg_match('/^\d/', $version) || ($release && version_compare($version, $release['version'], '<='))) {
+            if (! preg_match('/^\d+(\.\d+){1,3}(-?[A-Za-z][0-9A-Za-z.-]*)?$/', $version) || ($release && version_compare($version, $release['version'], '<='))) {
                 continue;
             }
 
-            // The zip attached by the release workflow has the right folder name; the tag archive does not (see fix_update_folder)
-            $package = 'https://github.com/' . self::GITHUB_REPO . '/archive/refs/tags/' . rawurlencode((string) $item['tag_name']) . '.zip';
+            // The zip attached by the release workflow has the right folder name; the tag archive does not (see fix_update_folder).
+            // Only that zip is accepted, no other asset of the release.
+            $package    = 'https://github.com/' . self::GITHUB_REPO . '/archive/refs/tags/' . rawurlencode((string) $item['tag_name']) . '.zip';
+            $asset_name = basename(self::GITHUB_REPO) . '-' . $version . '.zip';
+            $asset_base = 'https://github.com/' . self::GITHUB_REPO . '/releases/download/';
             foreach ((array) ($item['assets'] ?? array()) as $asset) {
-                if (! empty($asset['browser_download_url']) && substr((string) ($asset['name'] ?? ''), -4) === '.zip') {
-                    $package = (string) $asset['browser_download_url'];
+                $asset_url = (string) ($asset['browser_download_url'] ?? '');
+                if ((string) ($asset['name'] ?? '') === $asset_name && strpos($asset_url, $asset_base) === 0) {
+                    $package = $asset_url;
                     break;
                 }
             }
@@ -2061,8 +2099,8 @@ class HRI_Review_Importer
             'access_token' => $page_token,
         ), $base);
 
-        while ($url) {
-            $res = wp_remote_get($url, array('timeout' => 20));
+        for ($page = 0; $url && $page < self::FB_MAX_PAGES; $page++) {
+            $res = wp_safe_remote_get($url, array('timeout' => 20, 'redirection' => 0));
             if (is_wp_error($res)) {
                 /* translators: %s: error message */
                 throw new \RuntimeException(sprintf(__('HTTP error: %s', 'hri-reviews-importer'), $res->get_error_message()));
@@ -2131,6 +2169,7 @@ class HRI_Review_Importer
                         'post_type'     => 'reviews',
                         'post_title'    => sanitize_text_field($reviewer_name),
                         'post_status'   => $post_status,
+                        'post_author'   => 0, // not the user who clicked "Import now"
                         'post_date'     => $post_date,
                         'post_date_gmt' => $post_date_gmt,
                         'post_name'     => sanitize_title('review-facebook-' . $rec_id),
@@ -2159,21 +2198,41 @@ class HRI_Review_Importer
 
                 if (!empty($post_id)) {
                     // Szöveg betöltése a beállított első nyelvi mezőbe
-                    update_post_meta($post_id, 'review_' . $lang, wp_kses_post($text));
+                    update_post_meta($post_id, 'review_' . $lang, wp_kses($text, array()));
                     // Opcionális timestamp mentés
                     update_post_meta($post_id, 'review_timestamp', $post_date);
                 }
             }
 
             // Lapozás
-            $url = $body['paging']['next'] ?? null;
-            if ($url) {
-                // Append access_token only if not present
-                if (strpos($url, 'access_token=') === false) {
-                    $url = add_query_arg('access_token', $page_token, $url);
-                }
-            }
+            $url = $this->facebook_next_url($body['paging']['next'] ?? '', $page_token);
         }
+    }
+
+    /**
+     * URL of the next page of a Graph API list. It comes from the response and it gets the token,
+     * so nothing but a Graph API URL is followed.
+     *
+     * @return string|null Null on the last page.
+     * @throws \RuntimeException
+     */
+    private function facebook_next_url($next, $page_token)
+    {
+        if (! is_string($next) || $next === '') {
+            return null;
+        }
+
+        $parts = wp_parse_url($next);
+        if (
+            ! is_array($parts) || preg_match('/[\s\\\\]/', $next)
+            || strtolower($parts['scheme'] ?? '') !== 'https' || strtolower($parts['host'] ?? '') !== 'graph.facebook.com'
+            || isset($parts['user']) || isset($parts['pass']) || isset($parts['port'])
+        ) {
+            throw new \RuntimeException(__('Unexpected Facebook paging URL.', 'hri-reviews-importer'));
+        }
+
+        // Append access_token only if not present
+        return (strpos($next, 'access_token=') === false) ? add_query_arg('access_token', $page_token, $next) : $next;
     }
 
     public function handle_test_fb_connection()

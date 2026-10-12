@@ -4,7 +4,7 @@ Tags: reviews, google, facebook, importer, headless, custom post type, cron
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.3.0
+Stable tag: 1.3.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -29,7 +29,7 @@ Facebook import is not tested yet.
   - Business Profile API imports all reviews of a profile you manage, newest first. It uses an OAuth connection (client ID + secret, "Connect Google account" on the settings page) instead of the API key and Place ID, and Google has to approve Business Profile API access for the Cloud project. After connecting, the locations of the Google account are fetched automatically and can be chosen from a list (a single location is selected by itself). Each configured language is requested separately (`Accept-Language` header): reviews written in that language are stored as written, the others with Google's translation into it. The first run, and the first run after changing the location or the languages, fetches all reviews; later runs only the newest ones.
   - Legacy supports the **Import order** setting (newest / most relevant), but it can no longer be enabled in new Google Cloud projects.
   - New returns at most 5 reviews, always sorted by relevance (there is no "newest" order), and the `reviews` field is billed under the Enterprise + Atmosphere SKU.
-- Custom post type: **reviews** (dedicated admin menu). Reviews have no public single pages and are not included in sitemaps; they remain available to query loops (e.g. Bricks) and the REST API.
+- Custom post type: **reviews** (dedicated admin menu). Reviews have no public single pages and are not included in sitemaps; they remain available to query loops (e.g. Bricks) and the REST API. Only users who can edit the posts of others (Editors and Administrators) can add, edit or delete reviews. The imported review text is stored as plain text, without HTML.
   - Meta fields:  
     - `profile_photo_url` - The reviewer's profile photo
     - `review_number` (1–5) – rating  
@@ -62,6 +62,10 @@ Aggregated Google rating fields:
 2. Upload it under **Plugins → Add New → Upload Plugin** (or unpack it to `wp-content/plugins/headless-reviews-importer/`).
 3. Activate the plugin on the **Plugins** page.
 4. Open **Settings → Reviews Import Settings**, fill in the API keys, set the import frequency, minimum rating, and languages.
+
+== Uninstall ==
+
+Deleting the plugin on the **Plugins** screen removes its settings, API keys and tokens, and revokes the Google connection. The imported reviews stay in the database. Deactivating the plugin removes nothing.
 
 == Updates ==
 
