@@ -4,7 +4,7 @@ Tags: reviews, google, facebook, importer, headless, custom post type, cron
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.4.0
+Stable tag: 1.4.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -52,6 +52,8 @@ Bricks dynamic data tags for the aggregated Google rating (group **Reviews Impor
 - `{hri_google_rating_formatted}` – rating in the number format of the site language
 - `{hri_google_ratings_total}` – number of reviews, digits only
 - `{hri_google_ratings_total_formatted}` – number of reviews in the number format of the site language
+
+The tags accept `@fallback` (e.g. `{hri_google_rating @fallback:'–'}`), shown while the tag is empty. Filters such as `:plain` are accepted and change nothing.
 
 `AGENTS.md` describes every field and tag for building the frontend in Bricks.
 

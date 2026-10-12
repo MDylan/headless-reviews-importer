@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Headless Google/Facebook Reviews Importer
  * Description: Settings page (Facebook/Google keys, import frequency, imported languages, minimum rating), "Import now" button, last run display + "reviews" custom post type with meta fields and list columns.
- * Version:     1.4.0
+ * Version:     1.4.1
  * Author:      Molnár Dávid
  * License:     GPLv2 or later
  * Update URI:  https://github.com/MDylan/headless-reviews-importer
@@ -1282,18 +1282,47 @@ class HRI_Review_Importer
         return $tags;
     }
 
+    /**
+     * Splits the inside of "{name:filter @key:'value'}" into the tag name and its fallback text.
+     * Bricks hands the whole expression to the owner of the tag, so "@fallback" has to be handled here.
+     * Filters (":plain") and the other keys are accepted and ignored: the values are plain numbers.
+     *
+     * @return array|null 'name' and 'fallback'; null when it is not a tag of this plugin.
+     */
+    private function bricks_parse_tag($expression)
+    {
+        if (! preg_match('/^(hri_google_[a-z_]+)((?::|\s+@).*)?$/s', $expression, $m)) return null;
+        if (! array_key_exists($m[1], $this->bricks_tags())) return null;
+
+        $fallback = '';
+        if (isset($m[2]) && preg_match('/@fallback:(.*?)(?=\s+@[a-z_-]+:|$)/s', $m[2], $f)) {
+            $fallback = trim($f[1]);
+            // 'text' or "text": the quotes are not part of it
+            if (preg_match('/^([\'"])(.*)\1$/s', $fallback, $q)) $fallback = $q[2];
+        }
+
+        return array('name' => $m[1], 'fallback' => $fallback);
+    }
+
+    /** Value of a parsed tag, or its fallback while there is no rating */
+    private function bricks_resolve_tag($parsed)
+    {
+        $value = $this->bricks_tag_value($parsed['name']);
+        return $value !== '' ? $value : $parsed['fallback'];
+    }
+
     /** A single tag; the tags of other providers and non-string values pass through */
     public function bricks_render_tag($tag, $post, $context = 'text')
     {
         if (! is_string($tag)) return $tag;
 
-        $name = trim($tag, '{}');
-        if (! array_key_exists($name, $this->bricks_tags())) return $tag;
+        $parsed = $this->bricks_parse_tag(preg_replace('/^\{|\}$/', '', trim($tag)));
+        if (! $parsed) return $tag;
 
         // A number would be read as an attachment ID there
         if ('image' === $context || 'media' === $context) return '';
 
-        return $this->bricks_tag_value($name);
+        return $this->bricks_resolve_tag($parsed);
     }
 
     /** Tags inside a text / HTML content */
@@ -1301,10 +1330,12 @@ class HRI_Review_Importer
     {
         if (! is_string($content) || strpos($content, '{hri_google_') === false) return $content;
 
-        foreach (array_keys($this->bricks_tags()) as $name) {
-            $content = str_replace('{' . $name . '}', esc_html($this->bricks_tag_value($name)), $content);
-        }
-        return $content;
+        $rendered = preg_replace_callback('/\{(hri_google_[^{}]*)\}/', function ($m) {
+            $parsed = $this->bricks_parse_tag($m[1]);
+            return $parsed ? esc_html($this->bricks_resolve_tag($parsed)) : $m[0];
+        }, $content);
+
+        return is_string($rendered) ? $rendered : $content;
     }
 
     /** Language helpers */

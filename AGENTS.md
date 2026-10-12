@@ -33,9 +33,10 @@ The overall Google rating is stored in `wp_options`, which Bricks cannot read by
 | `{hri_google_ratings_total_formatted}` | `1 234` on a Hungarian site | Text shown to visitors. Follows the site locale. |
 
 - **These numbers come from Google, not from the imported posts.** They cover every review of the place, including the ones below the minimum rating and the ones the API did not return. The count is therefore not the number of `reviews` posts.
-- **The tags are empty until a Google import has completed.** They are also empty while Google is not configured (no API key and Place ID, or no connected Business Profile account). Put an "is not empty" condition on the badge so it hides itself in that state.
+- **The tags are empty until a Google import has completed.** They are also empty while Google is not configured (no API key and Place ID, or no connected Business Profile account). Put an "is not empty" condition on the badge so it hides itself in that state. Use the tag without a fallback in that condition, otherwise it is never empty.
 - **There are no Facebook aggregate tags.** The importer never fills the Facebook rating and count.
-- The tags take no modifiers: `{hri_google_rating:something}` is left unresolved.
+- **`@fallback` works** (plugin 1.4.1 or newer): `{hri_google_rating_formatted @fallback:'–'}` prints the fallback text while the tag is empty. Filters such as `:plain` or `:raw` are accepted and change nothing, because the values are plain numbers. In 1.4.0 a tag with a filter or a fallback is printed as literal text.
+- **Disconnecting the Google account empties the tags**, although the last rating is still stored. An expired or revoked token does not: the tags keep showing the last imported rating.
 
 Outside Bricks the same values are `get_option('hri_google_rating')` and `get_option('hri_user_ratings_total')`. Before the first import those options hold the placeholders `5.0` and `1`; the tags hide them, a direct `get_option()` call does not.
 
