@@ -36,9 +36,12 @@ class HRI_Review_Importer
     const OPTION_GBP_LOCATION = 'hri_gbp_location';
     const OPTION_GBP_TOKEN = 'hri_gbp_token';
     const OPTION_GBP_LOCATIONS = 'hri_gbp_locations';
+    const OPTION_GBP_SYNCED = 'hri_gbp_synced';
 
     // Business Profile API: max. review pages (50 reviews each) fetched per run
     const GBP_MAX_PAGES = 20;
+    // Bump to make every site fetch all pages again (e.g. after changing how comments are parsed)
+    const GBP_SYNC_VERSION = 1;
 
 
     // Cron hook
@@ -1254,12 +1257,11 @@ class HRI_Review_Importer
     /**
      * Create/update Google review posts.
      *
-     * @param array  $reviews        Normalized reviews (see build_google_review()).
-     * @param string $language       Language field that always receives the review text.
-     * @param array  $fill_languages Further language fields, only filled while they are empty.
+     * @param array  $reviews  Normalized reviews (see build_google_review()).
+     * @param string $language Language field that receives the review text.
      * @return array Counts: 'new' (created posts), 'existing' (already imported posts).
      */
-    private function save_google_reviews($reviews, $language, $fill_languages = array())
+    private function save_google_reviews($reviews, $language)
     {
         $skip_empty = (bool) get_option(self::OPTION_SKIP_EMPTY_REVIEWS, false);
         $min_rating = (int) get_option(self::OPTION_MIN_REVIEW_RATING, 4);
@@ -1306,11 +1308,6 @@ class HRI_Review_Importer
                 update_post_meta($post_id, 'review_id', $review['review_id']);
                 update_post_meta($post_id, 'review_' . $language, wp_kses_post($review['text']));
                 update_post_meta($post_id, 'profile_photo_url', esc_url_raw($review['profile_photo_url']));
-                foreach ($fill_languages as $lang) {
-                    if (get_post_meta($post_id, 'review_' . $lang, true) === '') {
-                        update_post_meta($post_id, 'review_' . $lang, wp_kses_post($review['text']));
-                    }
-                }
             }
         }
 
@@ -1393,9 +1390,13 @@ class HRI_Review_Importer
         return (string) $data['access_token'];
     }
 
-    private function gbp_get_json($url)
+    private function gbp_get_json($url, $language = '')
     {
-        return $this->google_get_json($url, array('Authorization' => 'Bearer ' . $this->gbp_get_access_token()));
+        $headers = array('Authorization' => 'Bearer ' . $this->gbp_get_access_token());
+        if ($language !== '') {
+            $headers['Accept-Language'] = $language;
+        }
+        return $this->google_get_json($url, $headers);
     }
 
     /** Collect a list that Google returns page by page under $key. */
@@ -1417,13 +1418,23 @@ class HRI_Review_Importer
     }
 
     /**
-     * The API returns foreign-language comments as
-     * "(Translated by Google) …\n\n(Original)\n…": keep the original text only.
+     * Comments written in another language than the requested one come with a translation, as
+     * "(Translated by Google) …\n\n(Original)\n…" or "…\n\n(Translated by Google)\n…": keep the
+     * translation only. The labels are localized, so they are matched by shape, not by wording.
      */
-    private function gbp_original_comment($comment)
+    private function gbp_comment_text($comment)
     {
-        $comment = trim((string) $comment);
-        if (preg_match('/^\(Translated by Google\).*?\(Original\)\s*(.*)$/su', $comment, $m)) {
+        $comment = trim(str_replace(array("\r\n", "\r"), "\n", (string) $comment));
+        // "Googl": the name is inflected in some languages ("Preložené Googlom")
+        $label = '\([^()\n]*Googl[^()\n]*\)';
+
+        // Translation first: it ends at the next label line ("(Original)"), if there is one.
+        if (preg_match('/^' . $label . '\s*(.*)$/su', $comment, $m)) {
+            $parts = array_map('trim', preg_split('/(?:^|\n)[ \t]*\([^()\n]+\)[ \t]*\n/u', $m[1], 2));
+            return ($parts[0] !== '' || !isset($parts[1])) ? $parts[0] : $parts[1];
+        }
+        // Original first: the translation follows its own label line.
+        if (preg_match('/\n[ \t]*' . $label . '[ \t]*\n\s*(\S.*)$/su', $comment, $m)) {
             return trim($m[1]);
         }
         return $comment;
@@ -1436,50 +1447,67 @@ class HRI_Review_Importer
             throw new \RuntimeException('Missing or invalid location. Expected format: accounts/{accountId}/locations/{locationId}');
         }
 
-        // The API has no language parameter: the text goes to the first language,
-        // the other language fields are only filled while they are empty.
+        // The API has no language parameter, the language is requested with the Accept-Language
+        // header: every language gets its own requests, with the other reviews translated into it.
         $langs = $this->get_imported_languages_short_array();
         $stars = array('ONE' => 1, 'TWO' => 2, 'THREE' => 3, 'FOUR' => 4, 'FIVE' => 5);
 
         $base = 'https://mybusiness.googleapis.com/v4/' . $location . '/reviews?pageSize=50&orderBy=' . rawurlencode('updateTime desc');
-        $page_token = '';
 
-        for ($page = 0; $page < self::GBP_MAX_PAGES; $page++) {
-            $data = $this->gbp_get_json($page_token !== '' ? $base . '&pageToken=' . rawurlencode($page_token) : $base);
+        // Until a run got through all pages, never stop early: after an interrupted first run
+        // (or a changed location / language list) the older reviews would never be fetched.
+        $signature = md5($location . '|' . implode(',', $langs) . '|' . self::GBP_SYNC_VERSION);
+        $full_sync = get_option(self::OPTION_GBP_SYNCED, '') !== $signature;
+        $max_pages = self::GBP_MAX_PAGES;
 
-            if ($page === 0) {
-                if (isset($data['averageRating'])) {
-                    update_option(self::OPTION_GOOGLE_RATING, number_format((float) $data['averageRating'], 1, '.', ''));
+        foreach ($langs as $i => $lang) {
+            $page_token = '';
+
+            for ($page = 0; $page < $max_pages; $page++) {
+                $data = $this->gbp_get_json($page_token !== '' ? $base . '&pageToken=' . rawurlencode($page_token) : $base, $lang);
+
+                if ($i === 0 && $page === 0) {
+                    if (isset($data['averageRating'])) {
+                        update_option(self::OPTION_GOOGLE_RATING, number_format((float) $data['averageRating'], 1, '.', ''));
+                    }
+                    if (isset($data['totalReviewCount'])) {
+                        update_option(self::OPTION_GOOGLE_RATINGS_TOTAL, floatval($data['totalReviewCount']));
+                    }
                 }
-                if (isset($data['totalReviewCount'])) {
-                    update_option(self::OPTION_GOOGLE_RATINGS_TOTAL, floatval($data['totalReviewCount']));
+
+                $reviews = array();
+                foreach ((array) ($data['reviews'] ?? array()) as $value) {
+                    $time = isset($value['createTime']) ? strtotime((string) $value['createTime']) : false;
+                    if (empty($value['reviewId']) || !$time) {
+                        continue;
+                    }
+                    $reviews[] = $this->build_google_review(
+                        '',
+                        $time,
+                        $this->gbp_comment_text($value['comment'] ?? ''),
+                        $value['reviewer']['displayName'] ?? '',
+                        $value['reviewer']['profilePhotoUrl'] ?? '',
+                        $stars[$value['starRating'] ?? ''] ?? 0,
+                        'gbp:' . $value['reviewId']
+                    );
+                }
+
+                $counts = $this->save_google_reviews($reviews, $lang);
+
+                $page_token = (string) ($data['nextPageToken'] ?? '');
+                if ($page_token === '') {
+                    break;
+                }
+                // Newest first: the first language stops at the first page that only has already
+                // imported reviews, the other languages then fetch the same number of pages.
+                if (!$full_sync && $i === 0 && $counts['new'] === 0 && $counts['existing'] > 0) {
+                    $max_pages = $page + 1;
                 }
             }
+        }
 
-            $reviews = array();
-            foreach ((array) ($data['reviews'] ?? array()) as $value) {
-                $time = isset($value['createTime']) ? strtotime((string) $value['createTime']) : false;
-                if (empty($value['reviewId']) || !$time) {
-                    continue;
-                }
-                $reviews[] = $this->build_google_review(
-                    '',
-                    $time,
-                    $this->gbp_original_comment($value['comment'] ?? ''),
-                    $value['reviewer']['displayName'] ?? '',
-                    $value['reviewer']['profilePhotoUrl'] ?? '',
-                    $stars[$value['starRating'] ?? ''] ?? 0,
-                    'gbp:' . $value['reviewId']
-                );
-            }
-
-            $counts = $this->save_google_reviews($reviews, $langs[0], array_slice($langs, 1));
-
-            // Newest first: stop at the first page that only has already imported reviews.
-            $page_token = (string) ($data['nextPageToken'] ?? '');
-            if ($page_token === '' || ($counts['new'] === 0 && $counts['existing'] > 0)) {
-                break;
-            }
+        if ($full_sync) {
+            update_option(self::OPTION_GBP_SYNCED, $signature, false);
         }
     }
 
