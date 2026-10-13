@@ -14,7 +14,7 @@ Each review is a post of the custom post type `reviews`. Use a Bricks query loop
 | Review text | `{cf_review_<lang>}`, e.g. `{cf_review_hu}` | plain text, no HTML | One meta key per language configured under **Settings → Reviews Import Settings → Imported languages**. Can be empty or missing for a language. |
 | Rating | `{cf_review_number}` | number, 1 to 5 | |
 | Reviewer photo | `{cf_profile_photo_url}` | absolute URL | Remote image on Google's or Facebook's servers, not in the media library. Can be empty, and old URLs can stop working, so give the avatar a fallback. |
-| Source | `{cf_review_source}` | `Google` or `Facebook` | Exactly these strings, capitalised. |
+| Source | `{cf_review_source}` | `Google` or `Facebook` | Exactly these strings, capitalised. Imported reviews are always `Google`; `Facebook` only appears on reviews added by hand in wp-admin. |
 | Review date | `{post_date}` | date | Takes a format, e.g. `{post_date:Y. F j.}`. Show the date only, not the time: for Google reviews the stored time is UTC, not site time. |
 | Review date (raw) | `{cf_review_timestamp}` | `Y-m-d H:i:s` | Same moment as `{post_date}`. |
 | External ID | `{cf_review_id}` | string | Used by the importer to find existing reviews. Not for display. |
@@ -34,7 +34,7 @@ The overall Google rating is stored in `wp_options`, which Bricks cannot read by
 
 - **These numbers come from Google, not from the imported posts.** They cover every review of the place, including the ones below the minimum rating and the ones the API did not return. The count is therefore not the number of `reviews` posts.
 - **The tags are empty until a Google import has completed.** They are also empty while Google is not configured (no API key and Place ID, or no connected Business Profile account). Put an "is not empty" condition on the badge so it hides itself in that state. Use the tag without a fallback in that condition, otherwise it is never empty.
-- **There are no Facebook aggregate tags.** The importer never fills the Facebook rating and count.
+- **There are no Facebook aggregate tags.** The plugin does not import from Facebook (the import was removed in 1.5.0, after Meta retired the Page ratings endpoint), so it has no Facebook rating or count.
 - **`@fallback` works** (plugin 1.4.1 or newer): `{hri_google_rating_formatted @fallback:'–'}` prints the fallback text while the tag is empty. Filters such as `:plain` or `:raw` are accepted and change nothing, because the values are plain numbers. In 1.4.0 a tag with a filter or a fallback is printed as literal text.
 - **Disconnecting the Google account empties the tags**, although the last rating is still stored. An expired or revoked token does not: the tags keep showing the last imported rating.
 
@@ -108,7 +108,7 @@ Do not design for these; the data is not there:
 
 - **Only five reviews show up.** The Places APIs return at most five reviews per language. Only the Business Profile API imports all of them.
 - **A review is missing.** It is probably a draft: its rating was below the minimum when it was imported. For Google reviews, lowering the minimum later does not publish existing drafts.
-- **Text is missing in one language.** Each language has its own meta key, and Facebook reviews only fill the first configured language.
+- **Text is missing in one language.** Each language has its own meta key, and a review added by hand only has the languages someone filled in.
 - **HTML shows up in a review.** Imported text is plain text, but a review edited by hand in wp-admin can contain HTML.
 - **The REST API returns no fields.** `/wp-json/wp/v2/reviews` only has the title and the date; the meta fields are not registered for REST.
 - **The aggregate tags are empty although reviews are imported.** The plugin records a run only when the whole import finished without an error. Check the error shown on the settings page.

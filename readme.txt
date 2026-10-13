@@ -1,25 +1,25 @@
-=== Headless Google/Facebook Reviews Importer ===
+=== Headless Reviews Importer ===
 Contributors: MDylan (David Molnar)
-Tags: reviews, google, facebook, importer, headless, custom post type, cron
+Tags: reviews, google, importer, headless, custom post type, cron
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.4.1
+Stable tag: 1.5.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-A headless Google/Facebook reviews importer: settings page, scheduled and manual import, minimum rating filter, multilingual text fields, a dedicated "reviews" custom post type, and extra admin list columns. Default admin labels are in English and fully translatable (i18n).
+A headless Google reviews importer: settings page, scheduled and manual import, minimum rating filter, multilingual text fields, a dedicated "reviews" custom post type, and extra admin list columns. Default admin labels are in English and fully translatable (i18n).
 
-== IMPORTANT == 
-Facebook import is not tested yet.
+== IMPORTANT ==
+Version 1.5.0 removed the Facebook import, because Meta retired the API behind it. See "Facebook reviews" below.
 
 == Description ==
 
-**Headless Google/Facebook Reviews Importer** is a developer-friendly plugin that prepares the infrastructure for importing reviews (Google / Facebook):
+**Headless Reviews Importer** is a developer-friendly plugin that prepares the infrastructure for importing Google reviews:
 
-- Settings page under **Settings → Reviews Import Settings**, with tabs (Google, Facebook, Import, Advanced) and a status bar (last run, next run, **Import now**). The Google tab only shows the fields of the selected API.
-- API keys: `facebook_graph_api_key`, `facebook_page_id`, `google_places_api_key`, `google_place_id`.
-- Keys and tokens (Places API key, OAuth client secret, Facebook Page Access Token) are write-only on the settings page: a saved value is never sent back to the browser, only its last 4 characters are shown. Leave the field empty to keep the saved value; **Change** replaces it, **Delete** removes it.
+- Settings page under **Settings → Reviews Import Settings**, with tabs (Google, Import, Advanced) and a status bar (last run, next run, **Import now**). The Google tab only shows the fields of the selected API.
+- API keys: `google_places_api_key`, `google_place_id`.
+- Keys and tokens (Places API key, OAuth client secret) are write-only on the settings page: a saved value is never sent back to the browser, only its last 4 characters are shown. Leave the field empty to keep the saved value; **Change** replaces it, **Delete** removes it.
 - Import frequency (hourly / twice daily / daily) + **"Import now"** button.
 - **Last run** display.
 - **Minimum imported rating**: only ratings greater than or equal to this value are published.
@@ -34,7 +34,7 @@ Facebook import is not tested yet.
     - `profile_photo_url` - The reviewer's profile photo
     - `review_number` (1–5) – rating  
     - `review_id` – non-editable identifier (set by the importer)
-    - `review_source` – "Google" or "Facebook"
+    - `review_source` – "Google" or "Facebook" (imported reviews are always "Google"; "Facebook" is for reviews added by hand)
     - `review_timestamp` – date of the review (`Y-m-d H:i:s`, set by the importer)
     - `review_{lang}` – dynamic fields based on configured languages (e.g., `review_hu`, `review_en`)
 - Admin list extra columns: **Source**, **Rating** (sortable).
@@ -43,7 +43,6 @@ Facebook import is not tested yet.
 Aggregated rating options (`wp_options`):
 - hri_google_rating: Google rating value
 - hri_user_ratings_total: Total number of Google reviews
-- hri_facebook_rating, hri_facebook_ratings_total: reserved, the importer does not fill them yet
 
 Until the first Google import the Google options hold the placeholders `5.0` and `1`.
 
@@ -97,8 +96,13 @@ Publishing a release: set the new version in the plugin header (`Version`) and i
 - **Minimum rating:** reviews below the threshold are saved as drafts.  
 - **Languages:** enter one short code per line (`hu`, `en`, ...). Values are normalized on save.
 
-== Facebook usage - !!! NOT TESTED !!! ==
-You need to create a Meta App with these privileges:
-- pages_show_list
-- pages_read_user_content
-- pages_read_engagement
+== Facebook reviews ==
+
+The plugin does not import from Facebook. Meta deprecated Page recommendations in Graph API v22.0 and offers no replacement:
+
+- According to Meta's changelog the Page ratings endpoint stops working in v22.0. In practice it answers with an empty list instead of an error: checked on v26.0 in October 2026, against a Page that has reviews.
+- v21.0 is the last version that returns them. It is only available to Meta apps that already called it, and Meta removes it on January 21, 2027.
+
+Facebook reviews can still be shown: add them by hand under **Reviews → Add New** and set **Review source** to "Facebook". They are stored like imported reviews.
+
+Updating from 1.4.1 or older deletes the saved Facebook Page ID and Page Access Token. Reviews stay untouched.

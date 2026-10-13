@@ -1,12 +1,12 @@
-# Headless Google/Facebook Reviews Importer
+# Headless Reviews Importer
 
 [![Latest release](https://img.shields.io/github/v/release/MDylan/headless-reviews-importer?include_prereleases&label=release)](https://github.com/MDylan/headless-reviews-importer/releases)
 [![License: GPL v2 or later](https://img.shields.io/badge/license-GPLv2%2B-blue)](https://www.gnu.org/licenses/gpl-2.0.html)
 
-A WordPress plugin that imports Google and Facebook reviews into a `reviews` custom post type, on a schedule or on demand. It is headless: it stores the reviews and the overall Google rating, and leaves the design to your theme or page builder (for example a Bricks query loop).
+A WordPress plugin that imports Google reviews into a `reviews` custom post type, on a schedule or on demand. It is headless: it stores the reviews and the overall Google rating, and leaves the design to your theme or page builder (for example a Bricks query loop).
 
-> [!WARNING]
-> The Facebook import has not been tested against the live Graph API yet.
+> [!NOTE]
+> Version 1.5.0 removed the Facebook import, because Meta retired the API behind it. See [Facebook reviews](#facebook-reviews).
 
 ## Contents
 
@@ -19,7 +19,7 @@ A WordPress plugin that imports Google and Facebook reviews into a `reviews` cus
 - [Bricks dynamic data tags](#bricks-dynamic-data-tags)
 - [Updates](#updates)
 - [Uninstall](#uninstall)
-- [Facebook setup](#facebook-setup)
+- [Facebook reviews](#facebook-reviews)
 - [Publishing a release](#publishing-a-release)
 - [License](#license)
 
@@ -48,7 +48,7 @@ A WordPress plugin that imports Google and Facebook reviews into a `reviews` cus
 
 ## Settings
 
-The settings page is under **Settings → Reviews Import Settings**. It has four tabs (Google, Facebook, Import, Advanced) and a status bar with the last run, the next run and the **Import now** button. The Google tab only shows the fields of the selected API.
+The settings page is under **Settings → Reviews Import Settings**. It has three tabs (Google, Import, Advanced) and a status bar with the last run, the next run and the **Import now** button. The Google tab only shows the fields of the selected API.
 
 | Setting | What it does |
 |---|---|
@@ -58,7 +58,7 @@ The settings page is under **Settings → Reviews Import Settings**. It has four
 | **Imported languages (short codes)** | One short code per line (`hu`, `en`, ...). Values like `hu_HU`, `en_US` or `de-DE` are normalized to short codes on save, and the default language of the site is always included. See Google's [language support](https://developers.google.com/maps/faq#languagesupport). |
 | **Pre-release updates** | Offers pre-releases as plugin updates too, see [Updates](#updates). |
 
-Keys and tokens (Places API key, OAuth client secret, Facebook Page Access Token) are write-only. A saved value is never sent back to the browser; only its last 4 characters are shown. Leave the field empty to keep the saved value, use **Change** to replace it and **Delete** to remove it.
+Keys and tokens (Places API key, OAuth client secret) are write-only. A saved value is never sent back to the browser; only its last 4 characters are shown. Leave the field empty to keep the saved value, use **Change** to replace it and **Delete** to remove it.
 
 ## Google API versions
 
@@ -87,7 +87,7 @@ The post title is the reviewer's name. The rest is in meta fields:
 |---|---|
 | `review_{lang}` | Review text, one field per configured language (`review_hu`, `review_en`, ...). Imported text is plain text, without HTML. |
 | `review_number` | Rating, 1 to 5 |
-| `review_source` | `Google` or `Facebook` |
+| `review_source` | `Google` or `Facebook`. Imported reviews are always `Google`; `Facebook` is for reviews added by hand. |
 | `review_timestamp` | Date of the review (`Y-m-d H:i:s`), set by the importer |
 | `profile_photo_url` | URL of the reviewer's profile photo |
 | `review_id` | Identifier set by the importer, not editable |
@@ -98,7 +98,6 @@ The post title is the reviewer's name. The rest is in meta fields:
 |---|---|
 | `hri_google_rating` | Overall Google rating |
 | `hri_user_ratings_total` | Total number of Google reviews |
-| `hri_facebook_rating`, `hri_facebook_ratings_total` | Reserved; the importer does not fill them yet |
 
 Until the first Google import the two Google options hold the placeholders `5.0` and `1`.
 
@@ -132,15 +131,16 @@ From version 1.3.0 the plugin updates itself from the releases of this repositor
 
 Deleting the plugin on the **Plugins** screen removes its settings, API keys and tokens, and revokes the Google connection. The imported reviews stay in the database. Deactivating the plugin removes nothing.
 
-## Facebook setup
+## Facebook reviews
 
-Create a Meta App with these permissions:
+The plugin does not import from Facebook. Meta deprecated Page recommendations in Graph API v22.0 and offers no replacement:
 
-- `pages_show_list`
-- `pages_read_user_content`
-- `pages_read_engagement`
+- According to Meta's changelog the Page ratings endpoint stops working in v22.0. In practice it answers with an empty list instead of an error: checked on v26.0 in October 2026, against a Page that has reviews.
+- v21.0 is the last version that returns them. It is only available to Meta apps that already called it, and Meta removes it on January 21, 2027.
 
-Then enter the **Facebook Page ID** and the **Facebook Page Access Token** on the Facebook tab of the settings page.
+Facebook reviews can still be shown: add them by hand under **Reviews → Add New** and set **Review source** to `Facebook`. They are stored like imported reviews, so query loops and the Bricks tags treat them the same.
+
+Updating from 1.4.1 or older deletes the saved Facebook Page ID and Page Access Token. Reviews stay untouched.
 
 ## Publishing a release
 

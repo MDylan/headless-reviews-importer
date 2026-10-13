@@ -1,9 +1,9 @@
 <?php
 
 /**
- * Plugin Name: Headless Google/Facebook Reviews Importer
- * Description: Settings page (Facebook/Google keys, import frequency, imported languages, minimum rating), "Import now" button, last run display + "reviews" custom post type with meta fields and list columns.
- * Version:     1.4.1
+ * Plugin Name: Headless Reviews Importer
+ * Description: Settings page (Google keys, import frequency, imported languages, minimum rating), "Import now" button, last run display + "reviews" custom post type with meta fields and list columns.
+ * Version:     1.5.0
  * Author:      Molnár Dávid
  * License:     GPLv2 or later
  * Update URI:  https://github.com/MDylan/headless-reviews-importer
@@ -16,8 +16,6 @@ if (! defined('ABSPATH')) exit;
 class HRI_Review_Importer
 {
     // Option keys
-    const OPTION_FACEBOOK_GRAPH_API_KEY = 'facebook_graph_api_key';
-    const OPTION_FACEBOOK_PAGE_ID       = 'facebook_page_id';
     const OPTION_GOOGLE_PLACES_API_KEY  = 'google_places_api_key';
     const OPTION_GOOGLE_PLACE_ID        = 'google_place_id';
     const OPTION_CRON_TIME              = 'hri_import_cron_time';
@@ -27,8 +25,6 @@ class HRI_Review_Importer
     const OPTION_SKIP_EMPTY_REVIEWS = 'hri_skip_empty_comments';
     const OPTION_GOOGLE_RATING =  'hri_google_rating';
     const OPTION_GOOGLE_RATINGS_TOTAL = 'hri_user_ratings_total';
-    const OPTION_FACEBOOK_RATING = 'hri_facebook_rating';
-    const OPTION_FACEBOOK_RATINGS_TOTAL = 'hri_facebook_ratings_total';
     const OPTION_LAST_ERROR = 'hri_last_error';
     const OPTION_IMPORT_ORDER = 'hri_import_order';
     const OPTION_GOOGLE_API_VERSION = 'hri_google_api_version';
@@ -39,6 +35,7 @@ class HRI_Review_Importer
     const OPTION_GBP_LOCATIONS = 'hri_gbp_locations';
     const OPTION_GBP_SYNCED = 'hri_gbp_synced';
     const OPTION_UPDATE_PRERELEASES = 'hri_update_prereleases';
+    const OPTION_DATA_VERSION = 'hri_data_version';
 
     // Updates come from the releases of this public GitHub repository (see the "Update URI" header)
     const GITHUB_REPO = 'MDylan/headless-reviews-importer';
@@ -48,8 +45,8 @@ class HRI_Review_Importer
     // Bump to make every site fetch all pages again (e.g. after changing how comments are parsed)
     const GBP_SYNC_VERSION = 1;
 
-    // Facebook Graph API: max. review pages (25 reviews each) fetched per run
-    const FB_MAX_PAGES = 100;
+    // Bump when options left by an older version have to be removed (see maybe_upgrade())
+    const DATA_VERSION = 1;
 
 
     // Cron hook
@@ -65,6 +62,7 @@ class HRI_Review_Importer
 
         // Admin UI
         add_action('admin_menu', array($this, 'add_menu'));
+        add_action('admin_init', array($this, 'maybe_upgrade'));
         add_action('admin_init', array($this, 'register_settings'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_assets'));
         add_filter('plugin_action_links_' . plugin_basename(__FILE__), array($this, 'add_settings_link'));
@@ -98,8 +96,6 @@ class HRI_Review_Importer
         add_filter('bricks/frontend/render_data', array($this, 'bricks_render_content'), 20, 2);
 
         add_action('hri_run_import', array($this, 'hri_run_imports'));
-
-        add_action('admin_post_hri_test_fb_connection', array($this, 'handle_test_fb_connection'));
 
         // Google Business Profile (OAuth)
         add_action('admin_post_hri_gbp_connect', array($this, 'handle_gbp_connect'));
@@ -148,12 +144,8 @@ class HRI_Review_Importer
         // Used on fronted so autoload=YES
         $this->hri_set_option_autoload(self::OPTION_GOOGLE_RATING, '5.0', $forcefalse ? false : true);
         $this->hri_set_option_autoload(self::OPTION_GOOGLE_RATINGS_TOTAL, '1', $forcefalse ? false : true);
-        $this->hri_set_option_autoload(self::OPTION_FACEBOOK_RATING, '5.0', $forcefalse ? false : true);
-        $this->hri_set_option_autoload(self::OPTION_FACEBOOK_RATINGS_TOTAL, '1', $forcefalse ? false : true);
 
         // Only on admin/import – autoload=NO
-        $this->hri_set_option_autoload(self::OPTION_FACEBOOK_GRAPH_API_KEY,   '', false);
-        $this->hri_set_option_autoload(self::OPTION_FACEBOOK_PAGE_ID,   '', false);
         $this->hri_set_option_autoload(self::OPTION_GOOGLE_PLACES_API_KEY,   '', false);
         $this->hri_set_option_autoload(self::OPTION_GOOGLE_PLACE_ID,   '', false);
         $this->hri_set_option_autoload(self::OPTION_CRON_TIME,   'hourly', false);
@@ -168,6 +160,23 @@ class HRI_Review_Importer
         $this->hri_set_option_autoload(self::OPTION_GBP_LOCATION,   '', false);
         $this->hri_set_option_autoload(self::OPTION_UPDATE_PRERELEASES,   0, false);
         $this->hri_set_option_autoload(self::OPTION_LAST_ERROR,   array(), false);
+    }
+
+    /**
+     * Removes what older versions left in the database. Up to 1.4.1 the plugin had a Facebook
+     * import; Meta retired the Page ratings endpoint, so its Page ID and access token go.
+     */
+    public function maybe_upgrade()
+    {
+        if ((int) get_option(self::OPTION_DATA_VERSION, 0) >= self::DATA_VERSION) {
+            return;
+        }
+
+        foreach (array('facebook_graph_api_key', 'facebook_page_id', 'hri_facebook_rating', 'hri_facebook_ratings_total') as $option) {
+            delete_option($option);
+        }
+
+        update_option(self::OPTION_DATA_VERSION, self::DATA_VERSION, true);
     }
 
     /** I18n */
@@ -235,7 +244,7 @@ class HRI_Review_Importer
     public function register_settings()
     {
         // Keys and tokens: write-only fields (see render_secret_field())
-        foreach (array(self::OPTION_FACEBOOK_GRAPH_API_KEY, self::OPTION_GOOGLE_PLACES_API_KEY, self::OPTION_GBP_CLIENT_SECRET) as $secret) {
+        foreach (array(self::OPTION_GOOGLE_PLACES_API_KEY, self::OPTION_GBP_CLIENT_SECRET) as $secret) {
             register_setting('hri_settings_group', $secret, array(
                 'type'              => 'string',
                 'sanitize_callback' => function ($value) use ($secret) {
@@ -244,11 +253,6 @@ class HRI_Review_Importer
                 'default'           => '',
             ));
         }
-        register_setting('hri_settings_group', self::OPTION_FACEBOOK_PAGE_ID, array(
-            'type'              => 'string',
-            'sanitize_callback' => array($this, 'sanitize_text'),
-            'default'           => '',
-        ));
         register_setting('hri_settings_group', self::OPTION_GOOGLE_PLACE_ID, array(
             'type'              => 'string',
             'sanitize_callback' => array($this, 'sanitize_text'),
@@ -326,10 +330,6 @@ class HRI_Review_Importer
         $this->add_field(self::OPTION_GBP_CLIENT_SECRET, __('Business Profile OAuth client secret', 'hri-reviews-importer'), 'google', 'render_secret_field', $gbp);
         $this->add_field('hri_gbp_connection', __('Google account', 'hri-reviews-importer'), 'google', 'render_gbp_connection_field', $gbp);
         $this->add_field(self::OPTION_GBP_LOCATION, __('Business Profile location', 'hri-reviews-importer'), 'google', 'render_gbp_location_field', $gbp);
-
-        $this->add_field(self::OPTION_FACEBOOK_PAGE_ID, __('Facebook Page ID', 'hri-reviews-importer'), 'facebook', 'render_text_field');
-        $this->add_field(self::OPTION_FACEBOOK_GRAPH_API_KEY, __('Facebook Page Access Token', 'hri-reviews-importer'), 'facebook', 'render_secret_field');
-        $this->add_field('hri_fb_test', __('Connection test', 'hri-reviews-importer'), 'facebook', 'render_fb_test_field');
 
         $this->add_field(self::OPTION_CRON_TIME, __('Import frequency', 'hri-reviews-importer'), 'import', 'render_cron_select');
         $this->add_field(self::OPTION_MIN_REVIEW_RATING, __('Minimum imported rating', 'hri-reviews-importer'), 'import', 'render_min_rating');
@@ -508,12 +508,6 @@ class HRI_Review_Importer
         }
     }
 
-    public function render_fb_test_field()
-    {
-        $this->render_action_button('hri_test_fb_connection', __('Test Facebook connection', 'hri-reviews-importer'));
-        echo '<p class="description">' . esc_html__('Tests the saved Page ID and access token.', 'hri-reviews-importer') . '</p>';
-    }
-
 
     /**
      * Add a field to a tab of the settings page.
@@ -563,7 +557,6 @@ class HRI_Review_Importer
     {
         return array(
             'google'   => __('Google', 'hri-reviews-importer'),
-            'facebook' => __('Facebook', 'hri-reviews-importer'),
             'import'   => __('Import', 'hri-reviews-importer'),
             'advanced' => __('Advanced', 'hri-reviews-importer'),
         );
@@ -575,7 +568,7 @@ class HRI_Review_Importer
 
         $tabs = $this->settings_tabs();
         // Coming back from an action: open the tab its button is on
-        $forced = isset($_GET['hri_gbp']) ? 'google' : (isset($_GET['hri_fbtest']) ? 'facebook' : '');
+        $forced = isset($_GET['hri_gbp']) ? 'google' : '';
         $active = ($forced !== '') ? $forced : key($tabs);
         $api    = $this->sanitize_google_api_version(get_option(self::OPTION_GOOGLE_API_VERSION, 'legacy'));
 ?>
@@ -600,9 +593,6 @@ class HRI_Review_Importer
                 <?php foreach ($tabs as $key => $label) : ?>
                     <div class="hri-panel<?php echo ($key === $active) ? ' is-active' : ''; ?>" id="hri-tab-<?php echo esc_attr($key); ?>" <?php echo ('google' === $key) ? 'data-api="' . esc_attr($api) . '"' : ''; ?>>
                         <h2 class="hri-panel-title"><?php echo esc_html($label); ?></h2>
-                        <?php if ('facebook' === $key) : ?>
-                            <p><?php echo esc_html__('The Facebook import has not been tested yet.', 'hri-reviews-importer'); ?></p>
-                        <?php endif; ?>
                         <table class="form-table" role="presentation">
                             <?php do_settings_fields('hri-review-import-settings', 'hri_section_' . $key); ?>
                         </table>
@@ -629,10 +619,6 @@ class HRI_Review_Importer
             'hri_import' => array(
                 'done'  => array('success', __('Import executed.', 'hri-reviews-importer')),
                 'error' => array('error', __('Import failed. See the last error below.', 'hri-reviews-importer')),
-            ),
-            'hri_fbtest' => array(
-                'ok'    => array('success', __('Facebook connection test succeeded.', 'hri-reviews-importer')),
-                'error' => array('error', __('Facebook connection test failed. See the "Last error" below.', 'hri-reviews-importer')),
             ),
             'hri_gbp'    => array(
                 'connected'    => array('success', __('Connected to Google Business Profile.', 'hri-reviews-importer') . $choose_location),
@@ -704,7 +690,6 @@ class HRI_Review_Importer
         // admin-post action => nonce action, nonce field
         $forms = array(
             'hri_import_now'          => array('hri_import_now_nonce', 'hri_import_now_nonce_field'),
-            'hri_test_fb_connection'  => array('hri_test_fb', 'hri_test_fb_field'),
             'hri_gbp_connect'         => array('hri_gbp_connect', 'hri_gbp_connect_field'),
             'hri_gbp_fetch_locations' => array('hri_gbp_fetch_locations', 'hri_gbp_fetch_locations_field'),
             'hri_gbp_disconnect'      => array('hri_gbp_disconnect', 'hri_gbp_disconnect_field'),
@@ -1396,7 +1381,7 @@ class HRI_Review_Importer
         $google_api_key = trim((string) get_option(self::OPTION_GOOGLE_PLACES_API_KEY, ''));
         $google_place_id = trim((string) get_option(self::OPTION_GOOGLE_PLACE_ID, ''));
 
-        // Each language and Facebook run independently: one failure must not stop the rest.
+        // Each language runs independently: one failure must not stop the rest.
         if (get_option(self::OPTION_GOOGLE_API_VERSION, 'legacy') === 'gbp') {
             try {
                 $this->hri_import_gbp_reviews();
@@ -1411,13 +1396,6 @@ class HRI_Review_Importer
                     $errors[] = 'Google (' . $lang . '): ' . $e->getMessage();
                 }
             }
-        }
-
-        //Facebook import
-        try {
-            $this->hri_import_facebook_reviews();
-        } catch (\Throwable $e) {
-            $errors[] = 'Facebook: ' . $e->getMessage();
         }
 
         if (!empty($errors)) {
@@ -2176,239 +2154,6 @@ class HRI_Review_Importer
     private function clear_last_error()
     {
         delete_option(self::OPTION_LAST_ERROR);
-    }
-
-    public function hri_import_facebook_reviews()
-    {
-        $page_id     = trim((string) get_option(self::OPTION_FACEBOOK_PAGE_ID, ''));
-        $page_token  = trim((string) get_option(self::OPTION_FACEBOOK_GRAPH_API_KEY, '')); // Page Access Token!
-        $min_rating  = (int) get_option(self::OPTION_MIN_REVIEW_RATING, 4);
-        $skip_empty  = (bool) get_option(self::OPTION_SKIP_EMPTY_REVIEWS, false);
-
-        if ($page_id === '' || $page_token === '') {
-            return;
-        }
-
-        // Első nyelv a beállított listából (ide tesszük a review szöveget)
-        $langs_raw = (string) get_option(self::OPTION_IMPORTED_LANGUAGES, 'en');
-        $lang = 'en';
-        foreach (preg_split('/[\r\n,]+/', $langs_raw) as $piece) {
-            $piece = strtolower(trim((string) $piece));
-            if ($piece !== '') {
-                $lang = preg_replace('/[^a-z]/', '', explode('-', str_replace('_', '-', $piece))[0]);
-                break;
-            }
-        }
-
-        $base  = 'https://graph.facebook.com/v21.0/' . rawurlencode($page_id) . '/ratings';
-        // Kérhető hasznos mezők (ha valamelyik hiányzik: API/engedély kérdése)
-        $fields = 'id,created_time,recommendation_type,review_text,has_rating,rating,'
-            . 'reviewer{id,name,picture.height(120).width(120)}';
-        $limit  = 25;
-
-        $url = add_query_arg(array(
-            'fields'       => $fields,
-            'limit'        => $limit,
-            'access_token' => $page_token,
-        ), $base);
-
-        for ($page = 0; $url && $page < self::FB_MAX_PAGES; $page++) {
-            $res = wp_safe_remote_get($url, array('timeout' => 20, 'redirection' => 0));
-            if (is_wp_error($res)) {
-                /* translators: %s: error message */
-                throw new \RuntimeException(sprintf(__('HTTP error: %s', 'hri-reviews-importer'), $res->get_error_message()));
-            }
-
-            $code = wp_remote_retrieve_response_code($res);
-            $body = json_decode(wp_remote_retrieve_body($res), true);
-
-            if ($code !== 200 || !is_array($body)) {
-                /* translators: 1: HTTP response code, 2: beginning of the response body */
-                throw new \RuntimeException(sprintf(__('Bad response (%1$s): %2$s', 'hri-reviews-importer'), $code, substr((string) wp_remote_retrieve_body($res), 0, 500)));
-            }
-
-            // Facebook hibaüzenet?
-            if (!empty($body['error']['message'])) {
-                /* translators: %s: error message */
-                throw new \RuntimeException(sprintf(__('Graph API error: %s', 'hri-reviews-importer'), $body['error']['message']));
-            }
-
-            foreach ((array) ($body['data'] ?? []) as $item) {
-                $rec_id   = isset($item['id']) ? (string) $item['id'] : '';
-                if ($rec_id === '') {
-                    continue;
-                }
-
-                $review_id  = 'facebook:' . $rec_id; // ütközés elkerülésére prefix
-                $created_iso = isset($item['created_time']) ? (string) $item['created_time'] : null;
-                $text        = isset($item['review_text']) ? (string) $item['review_text'] : '';
-
-                if ($skip_empty && trim($text) === '') {
-                    continue;
-                }
-
-                // Értékelés: ha van csillag (1–5), azt használjuk, különben Recommendation típusból képezünk
-                $rating = null;
-                if (isset($item['rating']) && is_numeric($item['rating'])) {
-                    $rating = (float) $item['rating'];
-                } elseif (!empty($item['recommendation_type'])) {
-                    // positive/negative → 5 vagy 1 (igény szerint állítható)
-                    $rating = ($item['recommendation_type'] === 'positive') ? 5.0 : 1.0;
-                }
-
-                // Dátumok
-                $post_date_gmt = $created_iso ? gmdate('Y-m-d H:i:s', strtotime($created_iso)) : current_time('mysql', true);
-                $post_date     = get_date_from_gmt($post_date_gmt, 'Y-m-d H:i:s');
-
-                // Reviewer adatok
-                $reviewer_name = $item['reviewer']['name'] ?? __('Facebook User', 'hri-reviews-importer');
-                $profile_photo_url = $item['reviewer']['picture']['data']['url'] ?? '';
-
-                // Meglévő bejegyzés?
-                $existing = get_posts(array(
-                    'post_type'      => 'reviews',
-                    'post_status'    => 'any',
-                    'meta_key'       => 'review_id',
-                    'meta_value'     => $review_id,
-                    'fields'         => 'ids',
-                    'posts_per_page' => 1,
-                    'no_found_rows'  => true,
-                ));
-
-                $post_status = ($rating !== null && $rating >= $min_rating) ? 'publish' : 'draft';
-
-                if (empty($existing)) {
-                    $post_id = wp_insert_post(array(
-                        'post_type'     => 'reviews',
-                        'post_title'    => sanitize_text_field($reviewer_name),
-                        'post_status'   => $post_status,
-                        'post_author'   => 0, // not the user who clicked "Import now"
-                        'post_date'     => $post_date,
-                        'post_date_gmt' => $post_date_gmt,
-                        'post_name'     => sanitize_title('review-facebook-' . $rec_id),
-                        'meta_input'    => array(
-                            'review_id'         => $review_id,
-                            'review_source'     => 'Facebook',
-                            'review_number'     => ($rating !== null ? (float) $rating : null),
-                            'profile_photo_url' => esc_url_raw($profile_photo_url),
-                        ),
-                    ));
-                } else {
-                    $post_id = (int) $existing[0];
-                    wp_update_post(array(
-                        'ID'          => $post_id,
-                        'post_status' => $post_status,
-                        // opcionális: frissítsd a dátumot a review időpontjára
-                        // 'post_date'     => $post_date,
-                        // 'post_date_gmt' => $post_date_gmt,
-                    ));
-                    if ($rating !== null) {
-                        update_post_meta($post_id, 'review_number', (float) $rating);
-                    }
-                    update_post_meta($post_id, 'profile_photo_url', esc_url_raw($profile_photo_url));
-                    update_post_meta($post_id, 'review_source', 'Facebook');
-                }
-
-                if (!empty($post_id)) {
-                    // Szöveg betöltése a beállított első nyelvi mezőbe
-                    update_post_meta($post_id, 'review_' . $lang, wp_kses($text, array()));
-                    // Opcionális timestamp mentés
-                    update_post_meta($post_id, 'review_timestamp', $post_date);
-                }
-            }
-
-            // Lapozás
-            $url = $this->facebook_next_url($body['paging']['next'] ?? '', $page_token);
-        }
-    }
-
-    /**
-     * URL of the next page of a Graph API list. It comes from the response and it gets the token,
-     * so nothing but a Graph API URL is followed.
-     *
-     * @return string|null Null on the last page.
-     * @throws \RuntimeException
-     */
-    private function facebook_next_url($next, $page_token)
-    {
-        if (! is_string($next) || $next === '') {
-            return null;
-        }
-
-        $parts = wp_parse_url($next);
-        if (
-            ! is_array($parts) || preg_match('/[\s\\\\]/', $next)
-            || strtolower($parts['scheme'] ?? '') !== 'https' || strtolower($parts['host'] ?? '') !== 'graph.facebook.com'
-            || isset($parts['user']) || isset($parts['pass']) || isset($parts['port'])
-        ) {
-            throw new \RuntimeException(__('Unexpected Facebook paging URL.', 'hri-reviews-importer'));
-        }
-
-        // Append access_token only if not present
-        return (strpos($next, 'access_token=') === false) ? add_query_arg('access_token', $page_token, $next) : $next;
-    }
-
-    public function handle_test_fb_connection()
-    {
-        if (! current_user_can('manage_options')) {
-            wp_die(esc_html__('Insufficient permissions.', 'hri-reviews-importer'));
-        }
-        check_admin_referer('hri_test_fb', 'hri_test_fb_field');
-
-        $page_id    = trim((string) get_option(self::OPTION_FACEBOOK_PAGE_ID, ''));
-        $page_token = trim((string) get_option(self::OPTION_FACEBOOK_GRAPH_API_KEY, ''));
-
-        try {
-            if ($page_id === '' || $page_token === '') {
-                throw new \RuntimeException(__('Missing Facebook Page ID or Page Access Token.', 'hri-reviews-importer'));
-            }
-
-            // v21.0 ajánlott a ratings/recommendations eléréséhez
-            $base  = 'https://graph.facebook.com/v21.0/' . rawurlencode($page_id) . '/ratings';
-            $url   = add_query_arg(array(
-                'fields'       => 'id',
-                'limit'        => 1,
-                'access_token' => $page_token,
-            ), $base);
-
-            $res = wp_remote_get($url, array('timeout' => 15));
-            if (is_wp_error($res)) {
-                /* translators: %s: error message */
-                throw new \RuntimeException(sprintf(__('HTTP error: %s', 'hri-reviews-importer'), $res->get_error_message()));
-            }
-
-            $code    = wp_remote_retrieve_response_code($res);
-            $bodyraw = wp_remote_retrieve_body($res);
-            $body    = json_decode($bodyraw, true);
-
-            if ($code !== 200) {
-                /* translators: 1: HTTP response code, 2: beginning of the response body */
-                throw new \RuntimeException(sprintf(__('Bad response code: %1$s – %2$s', 'hri-reviews-importer'), $code, substr($bodyraw, 0, 300)));
-            }
-            if (! is_array($body)) {
-                throw new \RuntimeException(__('Invalid JSON response.', 'hri-reviews-importer'));
-            }
-            if (! empty($body['error']['message'])) {
-                /* translators: %s: error message */
-                throw new \RuntimeException(sprintf(__('Graph API error: %s', 'hri-reviews-importer'), $body['error']['message']));
-            }
-
-            // siker
-            if (method_exists($this, 'clear_last_error')) {
-                $this->clear_last_error();
-            }
-            $q = array('hri_fbtest' => 'ok');
-        } catch (\Throwable $e) {
-            if (method_exists($this, 'log_error')) {
-                $this->log_error($e->getMessage(), array('where' => 'handle_test_fb_connection'));
-            } else {
-                error_log('HRI FB test: ' . $e->getMessage());
-            }
-            $q = array('hri_fbtest' => 'error');
-        }
-
-        wp_redirect(add_query_arg($q, admin_url('options-general.php?page=hri-review-import-settings')));
-        exit;
     }
 }
 

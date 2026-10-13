@@ -18,8 +18,6 @@ if (is_array($hri_token) && ! empty($hri_token['refresh_token'])) {
 
 // The option keys of HRI_Review_Importer (the plugin itself is not loaded here)
 $hri_options = array(
-    'facebook_graph_api_key',
-    'facebook_page_id',
     'google_places_api_key',
     'google_place_id',
     'hri_import_cron_time',
@@ -29,8 +27,6 @@ $hri_options = array(
     'hri_skip_empty_comments',
     'hri_google_rating',
     'hri_user_ratings_total',
-    'hri_facebook_rating',
-    'hri_facebook_ratings_total',
     'hri_last_error',
     'hri_import_order',
     'hri_google_api_version',
@@ -41,6 +37,12 @@ $hri_options = array(
     'hri_gbp_locations',
     'hri_gbp_synced',
     'hri_update_prereleases',
+    'hri_data_version',
+    // Left by the Facebook import of 1.4.1 and older, if the site was never opened in wp-admin since
+    'facebook_graph_api_key',
+    'facebook_page_id',
+    'hri_facebook_rating',
+    'hri_facebook_ratings_total',
     'hri_import.lock', // lock of a running import
 );
 foreach ($hri_options as $hri_option) {
