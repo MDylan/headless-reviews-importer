@@ -7,11 +7,14 @@
 
 if (! defined('WP_UNINSTALL_PLUGIN')) exit;
 
-// Best effort: the stored token is removed even if the revoke call fails.
+require_once __DIR__ . '/includes/secrets.php';
+
+// Best effort: the stored token is removed even if the revoke call fails, or if it cannot be decrypted.
 $hri_token = get_option('hri_gbp_token', array());
-if (is_array($hri_token) && ! empty($hri_token['refresh_token'])) {
+$hri_refresh_token = is_array($hri_token) ? hri_decrypt_secret($hri_token['refresh_token'] ?? '')['value'] : '';
+if ($hri_refresh_token !== '') {
     wp_remote_post('https://oauth2.googleapis.com/revoke', array(
-        'body'    => array('token' => $hri_token['refresh_token']),
+        'body'    => array('token' => $hri_refresh_token),
         'timeout' => 10,
     ));
 }

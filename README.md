@@ -7,6 +7,7 @@ A WordPress plugin that imports Google reviews into a `reviews` custom post type
 
 > [!NOTE]
 > Version 1.5.0 removed the Facebook import, because Meta retired the API behind it. See [Facebook reviews](#facebook-reviews).
+> Version 1.5.1 stores the Google keys and tokens encrypted. See [Encryption of keys and tokens](#encryption-of-keys-and-tokens).
 
 ## Contents
 
@@ -14,6 +15,7 @@ A WordPress plugin that imports Google reviews into a `reviews` custom post type
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Settings](#settings)
+- [Encryption of keys and tokens](#encryption-of-keys-and-tokens)
 - [Google API versions](#google-api-versions)
 - [Stored data](#stored-data)
 - [Bricks dynamic data tags](#bricks-dynamic-data-tags)
@@ -58,7 +60,23 @@ The settings page is under **Settings → Reviews Import Settings**. It has thre
 | **Imported languages (short codes)** | One short code per line (`hu`, `en`, ...). Values like `hu_HU`, `en_US` or `de-DE` are normalized to short codes on save, and the default language of the site is always included. See Google's [language support](https://developers.google.com/maps/faq#languagesupport). |
 | **Pre-release updates** | Offers pre-releases as plugin updates too, see [Updates](#updates). |
 
-Keys and tokens (Places API key, OAuth client secret) are write-only. A saved value is never sent back to the browser; only its last 4 characters are shown. Leave the field empty to keep the saved value, use **Change** to replace it and **Delete** to remove it.
+Keys and tokens (Places API key, OAuth client secret) are write-only. A saved value is never sent back to the browser; only its last 4 characters are shown. Leave the field empty to keep the saved value, use **Change** to replace it and **Delete** to remove it. They are stored encrypted, see below.
+
+## Encryption of keys and tokens
+
+From version 1.5.1 the Google Places API key, the OAuth client secret and the refresh token of the Business Profile connection are stored encrypted in the database (libsodium secretbox). A database dump or a copy of the database does not give them away.
+
+- **The key is in `wp-config.php`, not in the database.** The plugin uses `HRI_ENCRYPTION_KEY` if it is defined and at least 32 characters long, otherwise `AUTH_KEY` and `SECURE_AUTH_KEY`. To keep the secrets readable when the WordPress salts are changed, give the plugin its own key:
+
+  ```php
+  define('HRI_ENCRYPTION_KEY', 'a random string of at least 32 characters');
+  ```
+
+- **The access token is not stored.** It lives in memory for one request; each Business Profile import asks Google for a new one with the refresh token.
+- **No action is needed after updating.** Values stored unencrypted by 1.5.0 or older are rewritten encrypted on the first wp-admin request or import; there is no need to reconnect.
+- **If a value cannot be decrypted**, the imports stop, and every wp-admin screen shows an error. This happens when the key in `wp-config.php` changes, or when the database is moved to a site with a different `wp-config.php`. Enter the API key or the client secret again, and reconnect the Google account. Moving `HRI_ENCRYPTION_KEY` (or the salts) along with the database avoids this.
+- **Without a key** (no salts and no `HRI_ENCRYPTION_KEY`) keys and tokens cannot be saved, and the settings page says so.
+- It does not protect against code running on the site: that can read `wp-config.php` too.
 
 ## Google API versions
 
@@ -129,7 +147,7 @@ From version 1.3.0 the plugin updates itself from the releases of this repositor
 
 ## Uninstall
 
-Deleting the plugin on the **Plugins** screen removes its settings, API keys and tokens, and revokes the Google connection. The imported reviews stay in the database. Deactivating the plugin removes nothing.
+Deleting the plugin on the **Plugins** screen removes its settings, API keys and tokens, and revokes the Google connection (if the token can still be decrypted). The imported reviews stay in the database. Deactivating the plugin removes nothing.
 
 ## Facebook reviews
 

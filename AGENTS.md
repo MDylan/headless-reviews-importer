@@ -2,7 +2,7 @@
 
 This plugin only imports and stores reviews. It renders nothing on the frontend: no shortcode, no block, no template, no JSON-LD. A review strip or an overall rating badge is built in Bricks from the fields below.
 
-All of the code is in `headless-reviews-importer.php`. When a field or a tag changes there, update this file.
+All of the code is in `headless-reviews-importer.php`, apart from the encryption of the stored Google secrets in `includes/secrets.php`. When a field or a tag changes, update this file.
 
 ## Review fields
 
@@ -112,6 +112,7 @@ Do not design for these; the data is not there:
 - **HTML shows up in a review.** Imported text is plain text, but a review edited by hand in wp-admin can contain HTML.
 - **The REST API returns no fields.** `/wp-json/wp/v2/reviews` only has the title and the date; the meta fields are not registered for REST.
 - **The aggregate tags are empty although reviews are imported.** The plugin records a run only when the whole import finished without an error. Check the error shown on the settings page.
+- **No new reviews after moving the site or changing `wp-config.php`.** The Google keys and tokens are encrypted with a key from `wp-config.php`; on another key they cannot be decrypted and the import stops (wp-admin shows an error). The tags keep showing the last imported rating meanwhile. Enter the keys again and reconnect the Google account.
 
 ## Before writing a tag into an element
 

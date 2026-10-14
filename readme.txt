@@ -4,7 +4,7 @@ Tags: reviews, google, importer, headless, custom post type, cron
 Requires at least: 5.8
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.5.0
+Stable tag: 1.5.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -12,6 +12,7 @@ A headless Google reviews importer: settings page, scheduled and manual import, 
 
 == IMPORTANT ==
 Version 1.5.0 removed the Facebook import, because Meta retired the API behind it. See "Facebook reviews" below.
+Version 1.5.1 stores the Google keys and tokens encrypted. See "Encryption of keys and tokens" below.
 
 == Description ==
 
@@ -19,7 +20,7 @@ Version 1.5.0 removed the Facebook import, because Meta retired the API behind i
 
 - Settings page under **Settings → Reviews Import Settings**, with tabs (Google, Import, Advanced) and a status bar (last run, next run, **Import now**). The Google tab only shows the fields of the selected API.
 - API keys: `google_places_api_key`, `google_place_id`.
-- Keys and tokens (Places API key, OAuth client secret) are write-only on the settings page: a saved value is never sent back to the browser, only its last 4 characters are shown. Leave the field empty to keep the saved value; **Change** replaces it, **Delete** removes it.
+- Keys and tokens (Places API key, OAuth client secret) are write-only on the settings page: a saved value is never sent back to the browser, only its last 4 characters are shown. Leave the field empty to keep the saved value; **Change** replaces it, **Delete** removes it. They are stored encrypted (see "Encryption of keys and tokens").
 - Import frequency (hourly / twice daily / daily) + **"Import now"** button.
 - **Last run** display.
 - **Minimum imported rating**: only ratings greater than or equal to this value are published.
@@ -75,9 +76,20 @@ https://github.com/MDylan/headless-reviews-importer/blob/main/AGENTS.md
 3. Activate the plugin on the **Plugins** page.
 4. Open **Settings → Reviews Import Settings**, fill in the API keys, set the import frequency, minimum rating, and languages.
 
+== Encryption of keys and tokens ==
+
+From version 1.5.1 the Google Places API key, the OAuth client secret and the refresh token of the Business Profile connection are stored encrypted in the database (libsodium secretbox). A database dump or a copy of the database does not give them away.
+
+- The key is in `wp-config.php`, not in the database: `HRI_ENCRYPTION_KEY` if it is defined and at least 32 characters long, otherwise `AUTH_KEY` and `SECURE_AUTH_KEY`. To keep the secrets readable when the WordPress salts are changed, add `define('HRI_ENCRYPTION_KEY', 'a random string of at least 32 characters');` to `wp-config.php`.
+- The access token is not stored. Each Business Profile import asks Google for a new one with the refresh token.
+- Values stored unencrypted by 1.5.0 or older are rewritten encrypted on the first wp-admin request or import; there is no need to reconnect.
+- If a value cannot be decrypted (the key in `wp-config.php` changed, or the database was moved to another site), the imports stop and every wp-admin screen shows an error. Enter the API key or the client secret again, and reconnect the Google account.
+- Without a key, keys and tokens cannot be saved, and the settings page says so.
+- It does not protect against code running on the site: that can read `wp-config.php` too.
+
 == Uninstall ==
 
-Deleting the plugin on the **Plugins** screen removes its settings, API keys and tokens, and revokes the Google connection. The imported reviews stay in the database. Deactivating the plugin removes nothing.
+Deleting the plugin on the **Plugins** screen removes its settings, API keys and tokens, and revokes the Google connection (if the token can still be decrypted). The imported reviews stay in the database. Deactivating the plugin removes nothing.
 
 == Updates ==
 

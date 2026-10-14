@@ -3,7 +3,7 @@
 /**
  * Plugin Name: Headless Reviews Importer
  * Description: Settings page (Google keys, import frequency, imported languages, minimum rating), "Import now" button, last run display + "reviews" custom post type with meta fields and list columns.
- * Version:     1.5.0
+ * Version:     1.5.1
  * Author:      Molnár Dávid
  * License:     GPLv2 or later
  * Update URI:  https://github.com/MDylan/headless-reviews-importer
@@ -12,6 +12,8 @@
  */
 
 if (! defined('ABSPATH')) exit;
+
+require_once __DIR__ . '/includes/secrets.php';
 
 class HRI_Review_Importer
 {
@@ -45,8 +47,8 @@ class HRI_Review_Importer
     // Bump to make every site fetch all pages again (e.g. after changing how comments are parsed)
     const GBP_SYNC_VERSION = 1;
 
-    // Bump when options left by an older version have to be removed (see maybe_upgrade())
-    const DATA_VERSION = 1;
+    // Bump when options left by an older version have to be removed or rewritten (see maybe_upgrade())
+    const DATA_VERSION = 2;
 
 
     // Cron hook
@@ -54,6 +56,10 @@ class HRI_Review_Importer
 
     // Hook suffix of the settings page (set in add_menu())
     private $settings_hook = '';
+
+    // Business Profile access token: 'token', 'expires_at'. Kept in memory for the current request only,
+    // never stored; an import asks for a new one with the refresh token.
+    private $gbp_access = null;
 
     public function __construct()
     {
@@ -64,6 +70,7 @@ class HRI_Review_Importer
         add_action('admin_menu', array($this, 'add_menu'));
         add_action('admin_init', array($this, 'maybe_upgrade'));
         add_action('admin_init', array($this, 'register_settings'));
+        add_action('admin_notices', array($this, 'render_secret_notice'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue_admin_assets'));
         add_filter('plugin_action_links_' . plugin_basename(__FILE__), array($this, 'add_settings_link'));
         add_filter('plugin_row_meta', array($this, 'add_github_link'), 10, 2);
@@ -163,20 +170,99 @@ class HRI_Review_Importer
     }
 
     /**
-     * Removes what older versions left in the database. Up to 1.4.1 the plugin had a Facebook
-     * import; Meta retired the Page ratings endpoint, so its Page ID and access token go.
+     * Cleans up what older versions left in the database.
+     * 1: up to 1.4.1 the plugin had a Facebook import; Meta retired the Page ratings endpoint, so its
+     *    Page ID and access token go.
+     * 2: up to 1.5.0 the Google secrets were stored unencrypted; reading them rewrites them encrypted.
      */
     public function maybe_upgrade()
     {
-        if ((int) get_option(self::OPTION_DATA_VERSION, 0) >= self::DATA_VERSION) {
+        $version = (int) get_option(self::OPTION_DATA_VERSION, 0);
+        if ($version >= self::DATA_VERSION) {
             return;
         }
 
-        foreach (array('facebook_graph_api_key', 'facebook_page_id', 'hri_facebook_rating', 'hri_facebook_ratings_total') as $option) {
-            delete_option($option);
+        if ($version < 1) {
+            foreach (array('facebook_graph_api_key', 'facebook_page_id', 'hri_facebook_rating', 'hri_facebook_ratings_total') as $option) {
+                delete_option($option);
+            }
+        }
+        if ($version < 2) {
+            $this->get_secret(self::OPTION_GOOGLE_PLACES_API_KEY);
+            $this->get_secret(self::OPTION_GBP_CLIENT_SECRET);
+            $this->gbp_refresh_token();
         }
 
         update_option(self::OPTION_DATA_VERSION, self::DATA_VERSION, true);
+    }
+
+    /**
+     * Decrypted value of a secret option (Places API key, OAuth client secret); '' if it cannot be
+     * decrypted. A value stored unencrypted by an older version is rewritten encrypted.
+     */
+    private function get_secret($option)
+    {
+        $stored = hri_decrypt_secret(get_option($option, ''));
+        if ($stored['legacy'] && hri_secret_key() !== '') {
+            update_option($option, hri_encrypt_secret(trim($stored['value'])), false);
+        }
+        return trim($stored['value']);
+    }
+
+    /**
+     * Decrypted refresh token of the Business Profile connection; '' if there is none or it cannot be
+     * decrypted. Older versions stored it unencrypted, next to the access token: that form is rewritten.
+     */
+    private function gbp_refresh_token()
+    {
+        $token = get_option(self::OPTION_GBP_TOKEN, array());
+        if (! is_array($token)) {
+            return '';
+        }
+
+        $stored = hri_decrypt_secret($token['refresh_token'] ?? '');
+        if (($stored['legacy'] || isset($token['access_token'])) && $stored['value'] !== '' && hri_secret_key() !== '') {
+            update_option(self::OPTION_GBP_TOKEN, array('refresh_token' => hri_encrypt_secret($stored['value'])), false);
+        }
+        return $stored['value'];
+    }
+
+    /** Names of the stored secrets that cannot be decrypted (the key in wp-config.php changed, or the database comes from another site) */
+    private function secret_failures()
+    {
+        $token    = get_option(self::OPTION_GBP_TOKEN, array());
+        $failures = array();
+
+        if (hri_decrypt_secret(get_option(self::OPTION_GOOGLE_PLACES_API_KEY, ''))['failed']) {
+            $failures[self::OPTION_GOOGLE_PLACES_API_KEY] = __('Google Places API key', 'hri-reviews-importer');
+        }
+        if (hri_decrypt_secret(get_option(self::OPTION_GBP_CLIENT_SECRET, ''))['failed']) {
+            $failures[self::OPTION_GBP_CLIENT_SECRET] = __('Business Profile OAuth client secret', 'hri-reviews-importer');
+        }
+        if (is_array($token) && hri_decrypt_secret($token['refresh_token'] ?? '')['failed']) {
+            $failures[self::OPTION_GBP_TOKEN] = __('Google account connection', 'hri-reviews-importer');
+        }
+
+        return $failures;
+    }
+
+    /** On every admin screen: the imports stop without a word while a secret cannot be decrypted */
+    public function render_secret_notice()
+    {
+        if (! current_user_can('manage_options')) return;
+
+        $failures = $this->secret_failures();
+        if (empty($failures)) return;
+
+        printf(
+            '<div class="notice notice-error"><p><strong>%1$s</strong> %2$s</p><p>%3$s <a href="%4$s">%5$s</a></p></div>',
+            esc_html__('Headless Reviews Importer:', 'hri-reviews-importer'),
+            /* translators: %s: list of the stored secrets, e.g. "Google Places API key, Google account connection" */
+            esc_html(sprintf(__('These stored values cannot be decrypted: %s. Reviews are not imported from Google until this is fixed.', 'hri-reviews-importer'), implode(', ', $failures))),
+            esc_html__('The encryption key in wp-config.php (HRI_ENCRYPTION_KEY, or AUTH_KEY and SECURE_AUTH_KEY) has changed, or the database comes from another site. Enter the key or the client secret again, and reconnect the Google account if it is affected.', 'hri-reviews-importer'),
+            esc_url(admin_url('options-general.php?page=hri-review-import-settings')),
+            esc_html__('Reviews Import Settings', 'hri-reviews-importer')
+        );
     }
 
     /** I18n */
@@ -634,6 +720,13 @@ class HRI_Review_Importer
             }
         }
 
+        if (hri_secret_key() === '') {
+            printf(
+                '<div class="notice notice-warning"><p>%s</p></div>',
+                esc_html__('No encryption key: wp-config.php has no AUTH_KEY and SECURE_AUTH_KEY. Keys and tokens cannot be saved until you define HRI_ENCRYPTION_KEY there (a random string of at least 32 characters).', 'hri-reviews-importer')
+            );
+        }
+
         $last_error = get_option(self::OPTION_LAST_ERROR, array());
         if (! empty($last_error) && ! empty($last_error['message'])) : ?>
             <div class="notice notice-error">
@@ -750,8 +843,9 @@ class HRI_Review_Importer
     public function render_secret_field($args)
     {
         $option = $args['option'] ?? '';
-        $value  = trim((string) get_option($option, ''));
-        $saved  = ($value !== '');
+        $failed = hri_decrypt_secret(get_option($option, ''))['failed'];
+        $value  = $this->get_secret($option);
+        $saved  = ($value !== '' || $failed);
         $input  = sprintf(
             '<input type="password" class="regular-text hri-secret-input" id="%1$s" name="%1$s" value="" autocomplete="new-password" spellcheck="false" />',
             esc_attr($option)
@@ -765,8 +859,12 @@ class HRI_Review_Importer
         ?>
             <div class="hri-secret has-value">
                 <span class="hri-secret-saved">
-                    <span class="hri-badge hri-badge-ok"><?php echo esc_html__('Saved', 'hri-reviews-importer'); ?></span>
-                    <code><?php echo esc_html($hint); ?></code>
+                    <?php if ($failed) : ?>
+                        <span class="hri-badge hri-badge-off"><?php echo esc_html__('Cannot be decrypted', 'hri-reviews-importer'); ?></span>
+                    <?php else : ?>
+                        <span class="hri-badge hri-badge-ok"><?php echo esc_html__('Saved', 'hri-reviews-importer'); ?></span>
+                        <code><?php echo esc_html($hint); ?></code>
+                    <?php endif; ?>
                 </span>
                 <span class="hri-secret-idle">
                     <button type="button" class="button hri-secret-change"><?php echo esc_html__('Change', 'hri-reviews-importer'); ?></button>
@@ -869,14 +967,29 @@ class HRI_Review_Importer
     /**
      * The settings form never gets the saved value of a write-only field (see render_secret_field()),
      * so it sends an empty one unless a new value was typed in: empty keeps the saved value there.
+     * A value typed in is stored encrypted (see includes/secrets.php).
      */
     private function sanitize_secret($option, $value)
     {
         $value = is_string($value) ? trim($value) : '';
 
-        // Everything else that saves the option (e.g. hri_set_option_autoload()) means its empty value
-        if ($value !== '' || ! isset($_POST['option_page']) || $_POST['option_page'] !== 'hri_settings_group') {
+        // Everything else that saves the option (e.g. hri_set_option_autoload()) means its value as it is.
+        // Already encrypted: WordPress sanitizes the value of a new option twice.
+        if (! isset($_POST['option_page']) || $_POST['option_page'] !== 'hri_settings_group' || strpos($value, HRI_SECRET_PREFIX) === 0) {
             return $value;
+        }
+        if ($value !== '') {
+            try {
+                return hri_encrypt_secret($value);
+            } catch (\Throwable $e) {
+                add_settings_error($option, 'hri_no_encryption_key', sprintf(
+                    /* translators: 1: name of the field, 2: error message */
+                    __('%1$s was not saved. %2$s Define HRI_ENCRYPTION_KEY in wp-config.php (a random string of at least 32 characters), then save it again.', 'hri-reviews-importer'),
+                    $option === self::OPTION_GBP_CLIENT_SECRET ? __('Business Profile OAuth client secret', 'hri-reviews-importer') : __('Google Places API key', 'hri-reviews-importer'),
+                    $e->getMessage()
+                ));
+                return (string) get_option($option, '');
+            }
         }
         if (isset($_POST['hri_clear_secret']) && is_array($_POST['hri_clear_secret']) && ! empty($_POST['hri_clear_secret'][$option])) {
             return '';
@@ -1377,12 +1490,22 @@ class HRI_Review_Importer
     {
         $langs = $this->get_imported_languages_short_array();
         $errors = array();
+        $gbp = (get_option(self::OPTION_GOOGLE_API_VERSION, 'legacy') === 'gbp');
 
-        $google_api_key = trim((string) get_option(self::OPTION_GOOGLE_PLACES_API_KEY, ''));
+        // An undecryptable key would look like a missing one, and the import would finish without doing anything
+        $failures = array_intersect_key($this->secret_failures(), array_flip($gbp
+            ? array(self::OPTION_GBP_CLIENT_SECRET, self::OPTION_GBP_TOKEN)
+            : array(self::OPTION_GOOGLE_PLACES_API_KEY)));
+        if (!empty($failures)) {
+            /* translators: %s: list of the stored secrets, e.g. "Google Places API key" */
+            throw new \RuntimeException(sprintf(__('These stored values cannot be decrypted: %s. The encryption key in wp-config.php has changed, or the database comes from another site. Enter them again, or reconnect the Google account, on the settings page.', 'hri-reviews-importer'), implode(', ', $failures)));
+        }
+
+        $google_api_key = $this->get_secret(self::OPTION_GOOGLE_PLACES_API_KEY);
         $google_place_id = trim((string) get_option(self::OPTION_GOOGLE_PLACE_ID, ''));
 
         // Each language runs independently: one failure must not stop the rest.
-        if (get_option(self::OPTION_GOOGLE_API_VERSION, 'legacy') === 'gbp') {
+        if ($gbp) {
             try {
                 $this->hri_import_gbp_reviews();
             } catch (\Throwable $e) {
@@ -1457,7 +1580,7 @@ class HRI_Review_Importer
     /** Places API (Legacy) – supports reviews_sort (newest / most_relevant) */
     private function fetch_google_place_legacy($language)
     {
-        $google_api_key = trim((string) get_option(self::OPTION_GOOGLE_PLACES_API_KEY, ''));
+        $google_api_key = $this->get_secret(self::OPTION_GOOGLE_PLACES_API_KEY);
         $google_place_id = trim((string) get_option(self::OPTION_GOOGLE_PLACE_ID, ''));
         $order = get_option(self::OPTION_IMPORT_ORDER, 'newest');
 
@@ -1509,7 +1632,7 @@ class HRI_Review_Importer
     /** Places API (New) – max. 5 reviews, always sorted by relevance (no "newest" order) */
     private function fetch_google_place_new($language)
     {
-        $google_api_key = trim((string) get_option(self::OPTION_GOOGLE_PLACES_API_KEY, ''));
+        $google_api_key = $this->get_secret(self::OPTION_GOOGLE_PLACES_API_KEY);
         $google_place_id = trim((string) get_option(self::OPTION_GOOGLE_PLACE_ID, ''));
 
         $url = 'https://places.googleapis.com/v1/places/' . rawurlencode($google_place_id)
@@ -1665,7 +1788,7 @@ class HRI_Review_Importer
         $res = wp_remote_post('https://oauth2.googleapis.com/token', array(
             'body'    => array_merge(array(
                 'client_id'     => trim((string) get_option(self::OPTION_GBP_CLIENT_ID, '')),
-                'client_secret' => trim((string) get_option(self::OPTION_GBP_CLIENT_SECRET, '')),
+                'client_secret' => $this->get_secret(self::OPTION_GBP_CLIENT_SECRET),
             ), $params),
             'timeout' => 20,
         ));
@@ -1693,33 +1816,44 @@ class HRI_Review_Importer
         return $data;
     }
 
-    private function gbp_store_token($data, $refresh_token = '')
+    /**
+     * Keep a token response: the refresh token is stored encrypted, the access token only in memory.
+     *
+     * @throws \RuntimeException When there is no encryption key.
+     */
+    private function gbp_store_token($data)
     {
-        update_option(self::OPTION_GBP_TOKEN, array(
-            'access_token'  => (string) $data['access_token'],
-            'expires_at'    => time() + (int) ($data['expires_in'] ?? 3600),
-            // A refresh response has no refresh_token: keep the stored one.
-            'refresh_token' => (string) ($data['refresh_token'] ?? $refresh_token),
-        ), false);
+        // A refresh response has no refresh_token: the stored one stays.
+        if (!empty($data['refresh_token'])) {
+            update_option(self::OPTION_GBP_TOKEN, array('refresh_token' => hri_encrypt_secret((string) $data['refresh_token'])), false);
+        }
+        $this->gbp_access = array(
+            'token'      => (string) $data['access_token'],
+            'expires_at' => time() + (int) ($data['expires_in'] ?? 3600),
+        );
     }
 
     private function gbp_get_access_token()
     {
-        $token = get_option(self::OPTION_GBP_TOKEN, array());
-        if (!is_array($token) || empty($token['refresh_token'])) {
-            throw new \RuntimeException(__('Not connected. Connect a Google account on the settings page.', 'hri-reviews-importer'));
+        if ($this->gbp_access && $this->gbp_access['expires_at'] - 60 > time()) {
+            return $this->gbp_access['token'];
         }
-        if (!empty($token['access_token']) && (int) ($token['expires_at'] ?? 0) - 60 > time()) {
-            return $token['access_token'];
+
+        if (isset($this->secret_failures()[self::OPTION_GBP_TOKEN])) {
+            throw new \RuntimeException(__('The stored Google account connection cannot be decrypted: the encryption key in wp-config.php has changed, or the database comes from another site. Reconnect the Google account on the settings page.', 'hri-reviews-importer'));
+        }
+        $refresh_token = $this->gbp_refresh_token();
+        if ($refresh_token === '') {
+            throw new \RuntimeException(__('Not connected. Connect a Google account on the settings page.', 'hri-reviews-importer'));
         }
 
         $data = $this->gbp_token_request(array(
             'grant_type'    => 'refresh_token',
-            'refresh_token' => $token['refresh_token'],
+            'refresh_token' => $refresh_token,
         ));
-        $this->gbp_store_token($data, $token['refresh_token']);
+        $this->gbp_store_token($data);
 
-        return (string) $data['access_token'];
+        return $this->gbp_access['token'];
     }
 
     private function gbp_get_json($url, $language = '')
@@ -1855,6 +1989,11 @@ class HRI_Review_Importer
             $this->log_error(__('Missing OAuth client ID.', 'hri-reviews-importer'), array('where' => 'handle_gbp_connect'));
             $this->gbp_redirect_back('error');
         }
+        // The refresh token could not be stored after the consent screen
+        if (hri_secret_key() === '') {
+            $this->log_error(__('No encryption key: wp-config.php has no AUTH_KEY and SECURE_AUTH_KEY. Keys and tokens cannot be saved until you define HRI_ENCRYPTION_KEY there (a random string of at least 32 characters).', 'hri-reviews-importer'), array('where' => 'handle_gbp_connect'));
+            $this->gbp_redirect_back('error');
+        }
 
         wp_redirect('https://accounts.google.com/o/oauth2/v2/auth?' . http_build_query(array(
             'client_id'     => $client_id,
@@ -1920,11 +2059,11 @@ class HRI_Review_Importer
         }
         check_admin_referer('hri_gbp_disconnect', 'hri_gbp_disconnect_field');
 
-        $token = get_option(self::OPTION_GBP_TOKEN, array());
-        if (is_array($token) && ! empty($token['refresh_token'])) {
+        $refresh_token = $this->gbp_refresh_token();
+        if ($refresh_token !== '') {
             // Best effort: the local token is removed even if the revoke call fails.
             wp_remote_post('https://oauth2.googleapis.com/revoke', array(
-                'body'    => array('token' => $token['refresh_token']),
+                'body'    => array('token' => $refresh_token),
                 'timeout' => 10,
             ));
         }
